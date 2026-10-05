@@ -8,6 +8,13 @@ This install IS ScummVM (scummvm.exe, auto-launches target `auto-riven`). Full S
 is in `source/scummvm-2026.3.0-myst-25.tar.gz`. The relevant code is in `engines/mohawk/`
 (resource.cpp, bitmap.cpp, riven.cpp, riven_video.cpp) and `common/formats/quicktime.cpp`.
 
+## Checkpoints (git)
+This folder is a git repo that tracks ONLY the tool files (.gitignore is an allowlist: riven_*.py, CLAUDE.md,
+realmyst.ico). Game archives, .orig backups and .idlabels.json are never tracked. Checkpoints are commits.
+- 04f1e87 (2026-10-05): "Checkpoint: Riven Mod Tool with same-size journal patching", confirmed working in-game.
+- List: git log --oneline.  Restore the tool files to a checkpoint: git checkout <hash> -- . (game data unaffected)
+- Game DATA isn't in checkpoints: patched archives roll back via .orig / restore, and Boss keeps the edit sources.
+
 ## Tool: riven_img.py (this folder)
 Single-file Python tool. Needs Pillow; movie patching also needs ffmpeg/ffprobe.
 - `list [--movies]`, `extract` (tBMP -> PNG), `extract-movies` (tMOV -> playable .mov), `patch` (images by
