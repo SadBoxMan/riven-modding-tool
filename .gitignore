@@ -1,0 +1,9 @@
+# Riven Mod Tool checkpoints: track ONLY the tool's own files, never the game's data or backups.
+*
+!.gitignore
+!riven_gui.py
+!riven_img.py
+!riven_pack.py
+!riven_help.py
+!CLAUDE.md
+!realmyst.ico
