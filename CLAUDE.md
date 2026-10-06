@@ -14,6 +14,10 @@ realmyst.ico). Game archives, .orig backups and .idlabels.json are never tracked
 - 04f1e87 (2026-10-05): "Checkpoint: Riven Mod Tool with same-size journal patching", confirmed working in-game.
 - afc8151 (2026-10-05): Preferences + path hiding, location reassessment, whole-card layered export/import (PSD/ORA).
   Tested in sandboxes and against psd-tools; layered files NOT yet tried with real Photoshop/GIMP.
+- 4378b25 (2026-10-06): Location reorganization. New CARD_ID_RULES mechanism + override pass in assign_locations().
+  Temple: Temple Cave (0-45, 120-124), Easter Eggs (97), Lore Cards (364/480/492/657/665), guards -> Island paths.
+  Jungle: Entry Cave (From Temple), Maglev Exterior (From Temple), Prison (156-189), Rebel Puzzle (211/213/215-248 excl 226-227), Gallows (256-316), Guard Tower (317-332), D'ni Number Game (767), Dome->FMD.
+  Boiler: Dome+Scopes->FMD.
 - List: git log --oneline.  Restore the tool files to a checkpoint: git checkout <hash> -- . (game data unaffected)
 - Game DATA isn't in checkpoints: patched archives roll back via .orig / restore, and Boss keeps the edit sources.
 
@@ -109,8 +113,16 @@ Header size fields are not touched.
   the file name ("15_tdd_mg_1" -> card 15, weight 3), then the cards that list the item (weight 1); a card's
   location is the most common named location of its items. This took unlabelled items from about 35-41% per
   island to about 0-3%, and after Boss explained the last 24 items, to ZERO. Some labels are still educated guesses
-  from file names (e.g. Temple 'tsub' = "Submarine", 'ic'/'reb' = "Rebel tunnels"); correct them in LOC_RULES if
-  Boss knows better. FACTS FROM BOSS (authoritative): Boiler b2book = the bridge between Boiler and Temple Island;
+  from file names (e.g. 'ic'/'reb' = "Rebel tunnels"); correct them in LOC_RULES if Boss knows better.
+  PLAYTHROUGH ORDER: LOC_ORDER (per area, listing locations in typical-route order) drives the nav tree and the
+  Location column sort via loc_sort_key(), unless Preferences > "Order locations alphabetically" is chosen
+  (setting key loc_order = "progress" (default) or "alpha"; App.loc_key() picks the key, toggle_order() rebuilds); islands follow AREAS (Temple, Jungle, Boiler, Survey, Prison, Gehn's,
+  Rebel). The orders are my best guess at a route (Boss asked for "how players go through them"), NOT verified:
+  a script-graph BFS from the new-game card (t card 159) is only trustworthy on Temple, because tram/sub rides
+  are engine code, not scripts, so other islands look reachable only via the 233rd Age hub. Expect Boss to
+  correct the orders; unlisted locations sort after the listed ones.
+  FACTS FROM BOSS (authoritative): Temple 'tsub*' = "Sub-Temple" (NOT a submarine; Jungle's jsb*/jsub* really is
+  the Submarine); Boiler b2book = the bridge between Boiler and Temple Island;
   Boiler bismagdepot = part of the maglev tram set; Jungle jtngb* = the crystal viewer for the Rebel Age linking
   book; Jungle card jetunnel2village = the cave toward the village on the main path (CARD_NAME_RULES); all j5.*
   movies (j5.0a-d, 5.1, 5.3-5.5) = the Jungle village sentry sirens (they stay with the cards they play on);
