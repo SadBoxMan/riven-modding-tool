@@ -57,21 +57,21 @@ AREAS = [
 # A rule is (regex matched at the START of the code with the stack letter removed, location). First match wins.
 # Items no rule names are placed by where their card sits (see assign_locations), else listed under "Other".
 LOC_RULES = {
-    "t": [("gr|bug", "Gate Room"), ("sub", "Submarine"), ("tem|tmp", "Temple"),
+    "t": [("gr|bug", "Gate Room"), ("sub", "Sub-Temple"), ("tem|tmp", "Temple"),
           ("tl|tel(?!v)", "Telescope"), ("im[ag]", "Gehn's Imager"),
           ("br|supb|look|pw(r)?v", "Bridges"), ("w(af|ff|i)", "Waffle iron"),
           ("d?elev?|elv|tn(el|lb)", "Elevator"), ("otd|old", "Old cave"),
-          ("intr|logo|guar", "Intro & cutscenes"), ("isl|isex|ext", "Island paths & views"), ("tun", "Tunnels")],
+          ("intr|logo", "Intro & cutscenes"), ("isl|isex|ext", "Island paths & views"), ("tun", "Tunnels")],
     "j": [("tngb", "Crystal viewer (Rebel Age book)"),
           ("v", "Village"), ("sch", "School"), ("lag", "Lagoon"), ("sb|sub|insu", "Submarine"),
-          ("ytr", "Ytram trap"), ("fro", "Frog trap"), ("g?thr|th(dn|up)|inth|tgal|tfmd", "Throne"),
+          ("ytr", "Maglev Exterior (From Temple)"), ("fro", "Entry Cave (From Temple)"), ("g?thr|th(dn|up)|inth|tgal|tfmd", "Throne"),
           ("sou", "South path"), ("jun", "Jungle paths"), ("is[jl]", "Island paths & views"),
           ("ic|r(eb|tic|tal|teo|twa|prm|bt)", "Rebel tunnels"), ("clea|cc", "Clearcut"),
           ("lum|lcar|lmbr", "Lumber car"), ("ev(s|l|m)|tmel|tmev|totm", "Elevator"),
-          ("b(tl|eet|tp)", "Beetles"), ("leve", "Guard tower")],
+          ("b(tl|eet|tp)", "Beetles"), ("leve", "Guard Tower"), ("dom", "Fire Marble Dome")],
     "b": [("boi|blr|fl", "Boiler"), ("cra", "Crater"), ("g?lab|lbd", "Gehn's Lab"), ("y(t|c)", "Ytram"),
           ("br", "Bridges"), ("isl", "Island paths & views"), ("geh", "Gehn"), ("ook", "Book depot"),
-          ("bal", "Balcony path"), ("ste", "Steam pipes"), ("car|isma", "Maglev"), ("lmbr", "Lumber car")],
+          ("bal", "Balcony path"), ("ste", "Steam pipes"), ("car|isma", "Maglev"), ("lmbr", "Lumber car"), ("dom|sc[op]", "Fire Marble Dome")],
     "g": [("pla|[a-z]*poolz", "Plateau"), ("lak", "Lake"), ("wha", "Wahrk"), ("el[ev]|sube|ptel", "Elevators"),
           ("pin", "Pin table (topography)"), ("fou|fnt", "Fountain"), ("w(sc|ks)", "Scopes")],
     "p": [("isl", "Island paths & views"), ("el[ev]", "Elevator"), ("pri|cls|opn", "Prison cell")],
@@ -94,7 +94,62 @@ NAME_RULES = {
 }
 # rules on a CARD's own name (the NAME resource), applied to the card itself
 CARD_NAME_RULES = {"j": [("^jetunnel2village$", "Cave to the village (main path)")]}
+# Card-ID-based overrides: highest priority, applied after all name/propagation rules.
+# Each stack letter maps to a list of (frozenset_of_card_ids, location_name).
+CARD_ID_RULES = {
+    "t": [
+        (frozenset(range(0, 46)) | frozenset(range(120, 125)), "Temple Cave"),
+        (frozenset({97}), "Easter Eggs"),
+        (frozenset({364, 480, 492, 657, 665}), "Lore Cards"),
+    ],
+    "j": [
+        (frozenset(range(156, 190)), "Prison"),
+        (frozenset({211, 213}) | frozenset(range(215, 226)) | frozenset(range(228, 249)), "Rebel Puzzle"),  # excl 226-227 (crystal tunnel cards)
+        (frozenset(range(256, 317)), "Gallows"),
+        (frozenset(range(317, 333)), "Guard Tower"),
+        (frozenset({377}), "Jungle paths"),
+        (frozenset({133}), "Easter Eggs"),
+        (frozenset({767}), "D'ni Number Game"),
+    ],
+}
 SHARED = "Shared (linking books, domes, fades)"
+
+# The order locations are listed in (and the Location column sorts by), following a typical playthrough: where
+# you arrive or the hub first, then outward through the island, puzzle-heavy and transit places later, endings
+# last, shared pieces at the bottom. This is a best guess at a route, not a script: edit the lists to taste.
+# Anything not listed goes after the listed ones, alphabetically. Islands themselves are ordered by AREAS.
+LOC_ORDER = {
+    "Temple Island": ["Intro & cutscenes", "Gate Room", "Island paths & views", "Temple Cave", "Temple", "Old cave", "Tunnels",
+                      "Waffle iron", "Gehn's Imager", "Sub-Temple", "Bridges", "Elevator", "Maglev",
+                      "Fire Marble Dome", "Dome", "Scopes", "Telescope", "Lore Cards", "Easter Eggs", "Endings"],
+    "Jungle Island": ["Cave to the village (main path)", "Entry Cave (From Temple)", "Maglev Exterior (From Temple)",
+                      "Island paths & views", "Village", "Gallows", "Guard Tower", "Prison", "School",
+                      "D'ni Number Game", "Jungle paths", "Lagoon", "Clearcut", "Lumber car", "Submarine",
+                      "South path", "Throne", "Beetles", "Elevator", "Rebel tunnels", "Rebel Puzzle",
+                      "Crystal viewer (Rebel Age book)", "Easter Eggs", "Maglev", "Fire Marble Dome", "Scopes"],
+    "Boiler Island": ["Maglev", "Island paths & views", "Boiler", "Steam pipes", "Balcony path", "Ytram", "Crater",
+                      "Gehn's Lab", "Gehn", "Book depot", "Bridges", "Bridge to Temple Island", "Lumber car",
+                      "Fire Marble Dome"],
+    "Garden Island (Survey Island)": ["Maglev", "Plateau", "Elevators", "Lake", "Wahrk", "Fountain",
+                                      "Pin table (topography)", "Scopes", "Fire Marble Dome", "Dome"],
+    "Prison Island": ["Island paths & views", "Elevator", "Prison cell", "Fire Marble Dome", "Dome", "Scopes"],
+    "Gehn's Office (233rd Age)": ["Linking books", "Office", "Desk", "Bedroom", "Cage", "Bad endings",
+                                  "Fire Marble Dome"],
+    "Rebel Age (Tay)": ["Entrance", "Rebel village", "Bad endings"],
+    "Inventory, Marbles & Credits": ["Inventory icons", "Marbles", "Credits"],
+    "Menus & Journals": ["Main menu & options", "Atrus's journal", "Catherine's journal", "Trap book",
+                         "Black screens"],
+}
+
+
+def loc_sort_key(area, loc):
+    """Sort key putting an area's locations in playthrough order; shared pieces last of the named ones."""
+    order = LOC_ORDER.get(area, [])
+    if loc in order:
+        return (0, order.index(loc), "")
+    if loc == SHARED:
+        return (1, 0, "")
+    return (0, len(order), loc.lower())
 EXTRAS_RANGES = [(100, 199, "Inventory icons"), (200, 299, "Marbles"), (300, 499, "Credits")]
 OTHER = "Other: "
 
@@ -467,6 +522,19 @@ def assign_locations(resources, cards, by_id, stack=""):
         if not moved:
             break
     place_cards()
+    # Card-ID overrides: force specific card IDs (and their resources) to a fixed location.
+    id_overrides = {}
+    for cids, loc in CARD_ID_RULES.get(stack, []):
+        for cid in cids:
+            id_overrides[cid] = loc
+    if id_overrides:
+        for r in resources:
+            m2 = re.match(r"([0-9]+)_", r.name)
+            if m2 and int(m2.group(1)) in id_overrides:
+                r.loc = id_overrides[int(m2.group(1))]
+        for cid, c in cards.items():
+            if cid in id_overrides:
+                c.loc = id_overrides[cid]
 
 
 def tbmp_size(data):
@@ -635,6 +703,13 @@ class App:
         pm.add_checkbutton(label="Dark mode", variable=self.dark, command=self.toggle_dark)
         self.extra = tk.BooleanVar(value=bool(prefs.get("extra_info", False)))
         pm.add_checkbutton(label="Show extra info (file paths)", variable=self.extra, command=self.toggle_extra)
+        pm.add_separator()
+        order = prefs.get("loc_order", "progress")
+        self.loc_order = tk.StringVar(value=order if order in ("progress", "alpha") else "progress")
+        pm.add_radiobutton(label="Order locations by playthrough progression", variable=self.loc_order,
+                           value="progress", command=self.toggle_order)
+        pm.add_radiobutton(label="Order locations alphabetically", variable=self.loc_order,
+                           value="alpha", command=self.toggle_order)
         menu.add_cascade(label="Preferences", menu=pm)
         im = tk.Menu(menu, tearoff=0)
         im.add_command(label="Add ID labels to this island (images)", command=lambda: self.id_labels_add(False))
@@ -805,6 +880,15 @@ class App:
         set_titlebar_dark(self.root, dark)
         set_help_dark(dark)
 
+    def loc_key(self, area, loc):
+        """Sort key for a location: playthrough order, or plain alphabetical (Preferences)."""
+        return loc_sort_key(area, loc) if self.loc_order.get() == "progress" else (0, 0, loc.lower())
+
+    def toggle_order(self):
+        save_settings(loc_order=self.loc_order.get())
+        self.build_nav()
+        self.refresh_list()
+
     def toggle_extra(self):
         save_settings(extra_info=self.extra.get())
         self.set_status(self.status.cget("text"))  # re-scrub what's showing
@@ -936,7 +1020,7 @@ class App:
             groups = {}
             for r in res:
                 groups.setdefault(r.loc, []).append(r)
-            for loc in sorted(k for k in groups if not k.startswith(OTHER)):
+            for loc in sorted((k for k in groups if not k.startswith(OTHER)), key=lambda k: self.loc_key(title, k)):
                 self.nav.insert(aid, "end", iid=self.nav_iid(title, loc), text=loc,
                                 values=(len(groups[loc]),), tags=changed(groups[loc]))
             others = sorted(k for k in groups if k.startswith(OTHER))
@@ -1062,7 +1146,11 @@ class App:
             i = self.SORT_COLS.index(self.sort_col)
             filled = [r for r in rows if str(r[3][i]).strip()]
             empty = [r for r in rows if not str(r[3][i]).strip()]  # blanks stay last either way
-            filled.sort(key=lambda r: self.natural_key(r[3][i]), reverse=self.sort_dir == "desc")
+            if self.sort_col == "loc":   # follows the Preferences choice: playthrough order or alphabetical
+                key = lambda r: self.loc_key(self.cur_area, str(r[3][i]))  # noqa: E731
+            else:
+                key = lambda r: self.natural_key(r[3][i])  # noqa: E731
+            filled.sort(key=key, reverse=self.sort_dir == "desc")
             rows = filled + empty
         for iid, obj, tags, values in rows:
             self.rows[iid] = obj
