@@ -12,6 +12,8 @@ is in `source/scummvm-2026.3.0-myst-25.tar.gz`. The relevant code is in `engines
 This folder is a git repo that tracks ONLY the tool files (.gitignore is an allowlist: riven_*.py, CLAUDE.md,
 realmyst.ico). Game archives, .orig backups and .idlabels.json are never tracked. Checkpoints are commits.
 - 04f1e87 (2026-10-05): "Checkpoint: Riven Mod Tool with same-size journal patching", confirmed working in-game.
+- afc8151 (2026-10-05): Preferences + path hiding, location reassessment, whole-card layered export/import (PSD/ORA).
+  Tested in sandboxes and against psd-tools; layered files NOT yet tried with real Photoshop/GIMP.
 - List: git log --oneline.  Restore the tool files to a checkpoint: git checkout <hash> -- . (game data unaffected)
 - Game DATA isn't in checkpoints: patched archives roll back via .orig / restore, and Boss keeps the edit sources.
 
