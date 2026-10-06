@@ -27,21 +27,25 @@ Riven Mod Tool lets you browse every image and movie in Riven (25th Anniversary,
 - **Orange**: staged (waiting for Apply staged).
 - **Purple**: ID label (a test marker from the ID mode menu, not a real edit).
 
-## Dark mode
-**File > Dark mode** switches the whole tool, this help included, to a dark theme. It's remembered for next time. Windows draws the menu bar and the file dialogs itself, so those follow your Windows setting instead.
+## Preferences
+- **Dark mode** switches the whole tool, this help included, to a dark theme.
+- **Show extra info (file paths)** is **off by default**. Off, the tool says just "Saved", "Staged", "Exported 12 file(s)" and so on, hides folder names in the status bar, info line and error messages, and doesn't open Explorer after an export. On, it shows the full path of what was saved, loaded or staged. Off is the one to use when streaming.
+Both are remembered for next time.
+
+> Windows draws the menu bar and the file open/save windows itself. They follow your Windows dark/light setting, and the file windows will show folder names whatever this setting is.
 """),
 
 ("Finding images and movies", """
 # Finding images and movies
 ## Islands and locations (left panel)
-Every island (and the menus, inventory and credits) is listed with its locations, grouped from codes in Riven's own file names: Gate Room, Temple, Village, Fire Marble Dome and so on. Codes the tool can't name confidently are under **Other (unlabelled codes)**, by their raw code. Click an island to see all of it, or a location to narrow it down. The numbers are item counts.
+Every island (and the menus, inventory and credits) is listed with its locations, grouped from codes in Riven's own file names: Gate Room, Temple, Village, Fire Marble Dome and so on. Items whose code isn't recognised take the location of the card their file name points at (for example the Gehn's Imager chair movies), and only a handful of leftovers remain under **Other (unlabelled codes)**, by their raw code. The grouping is inferred from names and may not match what you'd call a place. Click an island to see all of it, or a location to narrow it down. The numbers are item counts.
 
 ## Images / Movies / Cards (top bar)
 - **Images** and **Movies** list resources by id, with the cards (screens) that use them.
 - **Cards** lists the game's screens. Pick a card, then pick any of its pictures, script images or movies from the **Item** box. **Find in list** jumps from there to the item in the Images or Movies list.
 
 ## Sorting
-Click a column header (ID, Location, Name, Used on cards / Contents, Status) to sort by it. Clicking again cycles **descending (▼) → ascending (▲) → default order**. Numbers sort as numbers (card 9 before card 10), and empty cells always go last. The sort stays while you search, filter or switch between Images, Movies and Cards. Clicking a different header starts that one fresh.
+Click a column header (ID, Location, Name, Used on cards / Contents, Status) to sort by it. The first click sorts **ascending (▲, smallest or A first)**, the next **descending (▼)**, and the third goes back to the **default order**. Numbers sort as numbers (card 9 before card 10), and empty cells always go last. The sort stays while you search, filter or switch between Images, Movies and Cards. Clicking a different header starts that one fresh.
 
 ## Search and Show
 - **Search** matches ids, names and card numbers (in Cards mode: card ids, names and the ids of everything on the card).
@@ -99,12 +103,8 @@ Movies get a **Time** slider to scrub through frames, and **Play original / curr
 - Smooth big gradients: **Filter > Noise > Add Noise**, around 1-2%, Uniform, Monochromatic.
 - Save: **File > Export > Export As...**, format **PNG**, untick **Transparency**, tick **Convert to sRGB**. Or File > Save a Copy... as PNG.
 
-## Editing an overlay with its background (Photoshop)
-- In **Cards** mode, pick the card. Export the background picture (pick it as the Item, then **Export original...**) and the overlay the same way. The info line shows the overlay's position, e.g. "at 412,188".
-- Open the background, then drag the overlay file in as a layer. With the **Move** tool, set the layer's **X/Y** in the **Properties** panel to that position.
-- Paint across both so they blend.
-- To get the overlay back at its exact size: **Ctrl+click** the overlay layer's thumbnail (selects exactly its rectangle), **Image > Crop**, **Layer > Flatten Image**, export as PNG.
-- If you changed the background too, export that as well, and load both.
+## Overlays and states: edit the whole card at once
+Overlays have to blend into the picture behind them, and a view often has several states. The easy way is to export the **whole card as a layered file**, where every image sits at its real position, edit the layers together, and import it back. See **Editing a whole card (layers)**.
 
 ## Menus & Journals pages (same-size mode)
 Images in Menus & Journals must fit the **exact space** the original used (see Safety for why). The tool handles it:
@@ -117,6 +117,35 @@ Images in Menus & Journals must fit the **exact space** the original used (see S
 
 ## GIMP / Affinity / Krita
 Same rules: keep the canvas size, flatten (GIMP: **Image > Flatten Image**), export a PNG without an alpha channel (GIMP: **File > Export As...**, and in the PNG options untick saving background or transparency data if offered).
+"""),
+
+("Editing a whole card (layers)", """
+# Editing a whole card (layers)
+A card is one screen: its full-screen pictures (the states of the view), the overlays that sit on them (a lever, a door, a light) and any script-drawn images. They have to line up, so you can export all of a card's images **together** as one layered file, edit them in place, and import the lot back.
+
+## Export
+- In **Cards** mode pick the card, then **Export card...** (or **File > Export card as layers or folder...**). It also works from an image with **Show on card** on.
+- Pick a format:
+- **Photoshop (.psd)**: also opens in GIMP, Krita and Affinity Photo.
+- **OpenRaster (.ora)**: GIMP and Krita open it natively. Paint.NET needs a free plugin for PSD or ORA.
+- **Folder of PNG files**: works in any editor, one file per image, plus a _preview.png and a _layout.txt listing where each image sits.
+- You get a **608 x 392 canvas** (the game screen) with **one layer per image**, at the position the game draws it, named like **#468 166_tgr_s1_brup.15 [Picture 3]**. The full-screen states are stacked (only the first starts visible; switch the others on to see them), overlays sit above them, and script-drawn images start hidden.
+- Tick **Add the card's movies as hidden reference layers** to also get each movie's first frame (named REF movie ...), placed and scaled as the game shows it. They help you line things up and are never imported back.
+- It exports the game as it is now, your earlier edits included (ID labels count as the originals).
+
+## Edit
+- Paint on the layers. **Keep every layer's name starting with its #id**: that is how the tool knows which image a layer belongs to. Don't delete or rename them.
+- Paint across an overlay and its background so they blend.
+- **Don't resize the canvas.** You may paint anywhere; each image is cut to the exact area the game draws it in.
+- **Transparent areas keep what's in the game**, so you can erase a layer to leave part of it alone.
+- **Ignored**: blend modes, layer opacity, layer masks and styles, adjustment layers, and any layer you add whose name doesn't start with a #id. **Merge new layers down into the image's layer** (Photoshop: Ctrl+E; GIMP: Layer > Merge Down), or the tool lists them as ignored.
+- Save as **PSD** (8 or 16 bits, RGB, layers kept) or **ORA**. Photoshop: File > Save As, Photoshop format, with Maximize Compatibility on.
+
+## Import
+- In **Cards** mode select the same card, then **Import card...** and choose the file, or use **File > Import card from folder of images...** for a folder of PNGs (named with the id first, like 468_anything.png).
+- Only images that **really changed** are staged. A summary tells you how many changed, how many didn't, and what was ignored. Then **Apply staged** as usual.
+- Wrong-sized or unknown files in a folder are skipped and listed.
+- In **Menus & Journals** the same-size rules apply when you Apply (see Importing images).
 """),
 
 ("Importing movies", """
@@ -270,18 +299,26 @@ PALETTES = {
 }
 
 
+def _help_open():
+    """True if the help window exists (False once it, or the whole application, has been closed)."""
+    try:
+        return _win is not None and bool(_win.top.winfo_exists())
+    except tk.TclError:
+        return False
+
+
 def set_help_dark(dark):
     """Called by the main window's theme toggle; restyles an open help window too."""
     global _dark
     _dark = dark
-    if _win is not None and _win.top.winfo_exists():
+    if _help_open():
         _win.apply_colors()
 
 
 def show_help(root, topic=None):
     """Open (or raise) the help window, optionally at a topic."""
     global _win
-    if _win is None or not _win.top.winfo_exists():
+    if not _help_open():
         _win = HelpWindow(root)
     _win.top.deiconify()
     _win.top.lift()

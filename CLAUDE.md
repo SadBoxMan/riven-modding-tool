@@ -88,7 +88,13 @@ Header size fields are not touched.
   card 144 (hatch, 51-57).
 
 ## GUI: riven_gui.py (Tkinter, same folder)
-- File > Dark mode (toggle, saved in %APPDATA%\RivenModTool\settings.json). Dark = ttk 'clam' recoloured
+- Menus: File | Preferences | ID mode | Help. Preferences holds the Dark mode toggle and "Show extra info (file
+  paths)" (default OFF, for livestreaming). Both are saved in %APPDATA%\RivenModTool\settings.json (keys dark,
+  extra_info). With extra info off the tool shows "Saved" / "Staged: new file" / "Exported N file(s)" instead of
+  paths, doesn't open Explorer after an export, and scrub_paths() reduces any drive path in the status bar or an
+  error dialog to its file name. Route any new user-visible text containing a path through App.with_path() or
+  set_status(). Native open/save dialogs and Explorer can't be scrubbed. Python's own OSError messages DOUBLE the
+  backslashes ('C:\\Users\\x'), which DRIVE_PATH handles (separators match runs). Dark mode: ttk 'clam' recoloured
   (the native vista theme can't be recoloured). Light = the theme captured at startup. Also covers the
   combobox popdown listboxes, Treeview tag colours (TAG_COLORS per mode), the help window (riven_help.PALETTES),
   and the DWM dark title bar (attribute 20/19). The native menubar can't be themed from Tk.
@@ -96,7 +102,22 @@ Header size fields are not touched.
 - Help menu / F1: riven_help.py holds the user guide (11 topics, light markup: # / ## / - / > / 4-space code /
   **bold**). Keep it in step when features or import rules change.
 - Nav tree: Island > Location. Locations come from codes in resource names ("166_tgr_..." -> Gate Room), see
-  LOC_RULES. Unknown codes go under "Other". Lookup order: t_data2 before t_data1, j_data2 before j_data1.
+  LOC_RULES / COMMON_RULES / NAME_RULES (regex matched at the START of the code with the stack letter removed).
+  Resources no rule names are placed by assign_locations(): first the card whose id is the number at the START of
+  the file name ("15_tdd_mg_1" -> card 15, weight 3), then the cards that list the item (weight 1); a card's
+  location is the most common named location of its items. This took unlabelled items from about 35-41% per
+  island to about 0-3%, and after Boss explained the last 24 items, to ZERO. Some labels are still educated guesses
+  from file names (e.g. Temple 'tsub' = "Submarine", 'ic'/'reb' = "Rebel tunnels"); correct them in LOC_RULES if
+  Boss knows better. FACTS FROM BOSS (authoritative): Boiler b2book = the bridge between Boiler and Temple Island;
+  Boiler bismagdepot = part of the maglev tram set; Jungle jtngb* = the crystal viewer for the Rebel Age linking
+  book; Jungle card jetunnel2village = the cave toward the village on the main path (CARD_NAME_RULES); all j5.*
+  movies (j5.0a-d, 5.1, 5.3-5.5) = the Jungle village sentry sirens (they stay with the cards they play on);
+  Gehn's Office 9_o6.15x/16x/19 = bad endings (15x: trapping yourself after meeting Gehn, 16x: before meeting him,
+  19: freeing Gehn from the trap book); Rebel Age 2_r6.18 (freeing Gehn from the trap book) and 2_r3.6 (trapping
+  yourself on Tay) = bad endings; Temple 138_t1.* = the Star Fissure endings. Still unclassified by Boss: Gehn's
+  2_o6.10z (now Office) and 79_o6.21d (now Bedroom), which may also be endings/scenes.
+  Lookup order: t_data2 before t_data1, j_data2 before j_data1.
+- Header-click sorting cycles default -> ASCENDING -> DESCENDING -> default (Boss had asc/desc mixed up at first).
   b2_data is never loaded by the game. extras.mhk holds inventory 100-102, marbles 200-205 and credits 302+.
 - Compare: Original / Current / New, with Side-by-side, Swipe, Blink and Difference views. Movies get a scrubber and
   ffplay buttons. Changes are staged, then "Apply staged" writes them per archive (refused while scummvm.exe runs).
@@ -111,6 +132,19 @@ Header size fields are not touched.
   Most PLST entries are full-screen STATES of a view (Temple: 1174 full vs 5 overlays). Images drawn only by engine
   C++ code (dome sliders, marbles, extras) have no card position.
 - Each GUI instance uses its own cache: %TEMP%\riven_gui_cache_<pid>, removed on exit.
+- WHOLE-CARD LAYERED EDITING (riven_layers.py + App.export_card / import_card_layers / import_card_folder):
+  exports every image of a card as a PSD (own writer, raw or RLE, 8-bit RGB with alpha channel), ORA
+  (OpenRaster zip) or a folder of PNGs (+ _preview.png, _layout.txt) on a 608x392 canvas; each layer sits at the
+  game's draw position and is named "#<id> <name> [Picture N]". Visible by default: the first full-screen
+  picture and the first overlay at each spot; script images hidden; optional hidden "REF movie #id" first-frame
+  layers (never imported). Import matches layers by the leading "#id", renders each into the image's own rect over
+  the CURRENT image (transparent = keep), and stages only images that really changed (PNGs go to
+  CACHE_DIR/imports). Ignored with a note: layers without a #id (new layers must be merged down), blend mode,
+  opacity, masks, adjustment layers. The reader handles raw/RLE/ZIP, 8/16-bit, luni names, and rejects
+  flattened/CMYK files with a clear message. VALIDATED against psd-tools 1.23 both ways (it reads our files, we
+  read its files); NOT yet tried with real Photoshop/GIMP files. Tests live in the scratchpad, not the repo.
+- Shell gotcha for future sessions: heredocs and python -c mangle backslashes (regexes and Windows paths end up
+  with halved or control characters). Write scripts with the Write tool, or build patterns with chr(92).
 - ID mode menu: stamps the current island's images (red border, "T1 #469") and optionally its movies (yellow,
   "T1 MOV #58", slow re-encode) to find ids in-game. Labelled keys are tracked in "<archive>.idlabels.json", so
   labels never cover real edits, a real edit or revert replaces a label, and Remove leaves real edits alone.
@@ -147,10 +181,13 @@ Header size fields are not touched.
 - Every encode round-trips exactly through the decoder port. NOT yet tested in-game.
 
 ## Pending / offered
-- DONE 2026-10-05: sortable columns (on_sort / insert_rows / natural_key in riven_gui.py). Header click cycles
-  default -> desc -> asc. Blanks stay last, and the sort persists across refresh and mode switches.
-- Offered, not yet requested: an "Intro & cutscenes" location (Temple card 159: movies 58-61 tlogo/tlogo1/tintro/
-  t1.0; card 138 endings 45-48) instead of them landing under "Other".
+- DONE 2026-10-05: sortable columns (on_sort / insert_rows / natural_key in riven_gui.py). Blanks stay last, and the
+  sort persists across refresh and mode switches. Direction was flipped later: first click = ascending.
+- DONE 2026-10-05: "Intro & cutscenes" location (Temple: tintro/tlogo/tguard and the t1.x cage/ending movies).
+- DONE 2026-10-05: Preferences menu, path hiding, location reassessment, whole-card layered export/import.
+  These changes are NOT committed yet (last checkpoint: df25f19); .gitignore now also allows riven_layers.py.
+- Ideas not started: apply an imported layer's opacity/blend; import new (unnamed) layers by merging them onto the
+  layer below; movie reference layers using the LAST frame too.
 
 ## Possible next steps
 - In-game test of image and movie patches.

@@ -9,6 +9,7 @@ been patched) and a New file you load. Changes are staged first and written in o
 "Apply staged". All the archive work is done by riven_img.py (same folder).
 """
 import atexit
+import collections
 import concurrent.futures as cf
 import ctypes
 import io
@@ -32,6 +33,7 @@ from PIL import Image, ImageChops, ImageDraw, ImageFont, ImageTk
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import riven_img as R  # noqa: E402
+import riven_layers as LY  # noqa: E402
 import riven_help  # noqa: E402
 from riven_help import TOPIC_NAMES, set_help_dark, show_help  # noqa: E402
 
@@ -52,24 +54,46 @@ AREAS = [
      "spare). Images only; movies and ID mode aren't available here."),
 ]
 # Locations inside an area, from the code in resource names ("166_tgr_s1..." -> stack 't', code 'gr').
-# Only codes I'm confident about get a name; the rest go under "Other" by their raw code.
+# A rule is (regex matched at the START of the code with the stack letter removed, location). First match wins.
+# Items no rule names are placed by where their card sits (see assign_locations), else listed under "Other".
 LOC_RULES = {
-    "t": [("gr", "Gate Room"), ("tem", "Temple"), ("tel", "Telescope"), ("im[ag]", "Gehn's Imager"),
-          ("br", "Bridges"), ("isl", "Island paths & views"), ("tun", "Tunnels")],
-    "j": [("v", "Village"), ("sch", "School"), ("lag", "Lagoon"), ("sub", "Submarine"), ("ytr", "Ytram trap"),
-          ("fro", "Frog trap"), ("thr", "Throne"), ("sou", "South path"), ("jun", "Jungle paths"),
-          ("is[jl]", "Island paths & views")],
-    "b": [("boi|blr", "Boiler"), ("cra", "Crater"), ("lab", "Gehn's Lab"), ("yt", "Ytram"), ("br", "Bridges"),
-          ("isl", "Island paths & views"), ("geh", "Gehn")],
-    "g": [("pla", "Plateau"), ("lak", "Lake"), ("wha", "Wahrk"), ("el[ev]", "Elevators"),
-          ("pin", "Pin table (topography)"), ("fou|fnt", "Fountain")],
+    "t": [("gr|bug", "Gate Room"), ("sub", "Submarine"), ("tem|tmp", "Temple"),
+          ("tl|tel(?!v)", "Telescope"), ("im[ag]", "Gehn's Imager"),
+          ("br|supb|look|pw(r)?v", "Bridges"), ("w(af|ff|i)", "Waffle iron"),
+          ("d?elev?|elv|tn(el|lb)", "Elevator"), ("otd|old", "Old cave"),
+          ("intr|logo|guar", "Intro & cutscenes"), ("isl|isex|ext", "Island paths & views"), ("tun", "Tunnels")],
+    "j": [("tngb", "Crystal viewer (Rebel Age book)"),
+          ("v", "Village"), ("sch", "School"), ("lag", "Lagoon"), ("sb|sub|insu", "Submarine"),
+          ("ytr", "Ytram trap"), ("fro", "Frog trap"), ("g?thr|th(dn|up)|inth|tgal|tfmd", "Throne"),
+          ("sou", "South path"), ("jun", "Jungle paths"), ("is[jl]", "Island paths & views"),
+          ("ic|r(eb|tic|tal|teo|twa|prm|bt)", "Rebel tunnels"), ("clea|cc", "Clearcut"),
+          ("lum|lcar|lmbr", "Lumber car"), ("ev(s|l|m)|tmel|tmev|totm", "Elevator"),
+          ("b(tl|eet|tp)", "Beetles"), ("leve", "Guard tower")],
+    "b": [("boi|blr|fl", "Boiler"), ("cra", "Crater"), ("g?lab|lbd", "Gehn's Lab"), ("y(t|c)", "Ytram"),
+          ("br", "Bridges"), ("isl", "Island paths & views"), ("geh", "Gehn"), ("ook", "Book depot"),
+          ("bal", "Balcony path"), ("ste", "Steam pipes"), ("car|isma", "Maglev"), ("lmbr", "Lumber car")],
+    "g": [("pla|[a-z]*poolz", "Plateau"), ("lak", "Lake"), ("wha", "Wahrk"), ("el[ev]|sube|ptel", "Elevators"),
+          ("pin", "Pin table (topography)"), ("fou|fnt", "Fountain"), ("w(sc|ks)", "Scopes")],
     "p": [("isl", "Island paths & views"), ("el[ev]", "Elevator"), ("pri|cls|opn", "Prison cell")],
-    "o": [("[pjgbt](bk|bo|fl)", "Linking books"), ("off", "Office"), ("bed", "Bedroom"), ("cag", "Cage"),
+    "o": [("[pjgbt](bk|bo|fl)|book|fmd(bo|bk|fl)", "Linking books"), ("off", "Office"), ("bed", "Bedroom"), ("cag", "Cage"),
           ("des|drw", "Desk")],
-    "r": [("reb", "Rebel village"), ("ent", "Entrance")],
-    "a": [("cat", "Catherine's journal"), ("tra", "Trap book"), ("atr", "Atrus's journal")],
+    "r": [("reb|prm", "Rebel village"), ("ent", "Entrance")],
+    "a": [("cat", "Catherine's journal"), ("tra", "Trap book"), ("atr", "Atrus's journal"),
+          ("riv|mon|vol", "Main menu & options"), ("bla", "Black screens")],
 }
-COMMON_RULES = [("fmd", "Fire Marble Dome"), ("mag", "Maglev"), ("dom", "Dome"), ("sc[op]", "Scopes")]
+COMMON_RULES = [("fmd|slid", "Fire Marble Dome"), ("[a-z]?(mag|mg(ca|bt|jg|tm|t))|nomg", "Maglev"),
+                ("dom|opni|clsi", "Dome"), ("sc[op]", "Scopes")]
+# rules on the whole name, for things the code can't tell apart ("159_t1.0" is the cage scene, a cutscene).
+# Facts from Boss: b2book = the Boiler-Temple bridge; 9_o6.* = Gehn's office bad endings (trapping yourself, or
+# freeing Gehn from the trap book); 2_r* = the Rebel Age bad endings; 138_t1.* = the Star Fissure endings.
+NAME_RULES = {
+    "t": [("^138_t1[.]", "Endings"), ("^[0-9]+_t1[.][0-9a-z]", "Intro & cutscenes")],
+    "b": [("^[0-9]+_b2book", "Bridge to Temple Island")],
+    "o": [("^9_o6[.]", "Bad endings")],
+    "r": [("^2_r[0-9]", "Bad endings")],
+}
+# rules on a CARD's own name (the NAME resource), applied to the card itself
+CARD_NAME_RULES = {"j": [("^jetunnel2village$", "Cave to the village (main path)")]}
 SHARED = "Shared (linking books, domes, fades)"
 EXTRAS_RANGES = [(100, 199, "Inventory icons"), (200, 299, "Marbles"), (300, 499, "Credits")]
 OTHER = "Other: "
@@ -82,6 +106,9 @@ def location_of(stack, r):
     if not m:
         return OTHER + "unnamed"
     code = m.group(1)
+    for pat, lbl in NAME_RULES.get(stack, []):
+        if re.match(pat, r.name.lower()):
+            return lbl
     if code[0] == "a" and stack != "a":
         return SHARED
     rest = code[1:] if code[0] == stack else code
@@ -110,6 +137,19 @@ def _clean_old_caches():
             except OSError:
                 pass
 KIND_NAMES = {R.TBMP: "image", R.TMOV: "movie"}
+
+
+# ---------------------------------------------------------------- path hiding (for streaming)
+def scrub_paths(text, game_dir=""):
+    """Replace file paths in `text` with short names, so nothing identifying shows on screen."""
+    return DRIVE_PATH.sub(lambda m: m.group(1), text)   # "C:/any/folders/file.png" -> "file.png"
+
+
+# A drive path: folders may contain spaces, the last part (the file name) may not. Built from chr() so the
+# source has no backslashes to get wrong. SEP matches a backslash or a slash.
+_BS, _NO = chr(92), chr(34) + chr(39) + chr(10) + chr(13) + ":*?<>|"
+_SEP = "[" + _BS * 2 + "/]+"      # one or more: Python's own error messages double the backslashes
+DRIVE_PATH = re.compile("(?<![A-Za-z0-9_])[A-Za-z]:" + _SEP + "(?:[^" + _BS * 2 + "/" + _NO + "]+" + _SEP + ")*([^" + _BS * 2 + "/ " + _NO + "]+)")
 
 
 # ---------------------------------------------------------------- settings + theme
@@ -369,7 +409,6 @@ def load_area(game_dir, files, title=""):
         r.cards = [card_label(c) for c in r.card_ids]
         r.area, r.loc = title, location_of(stack, r)
 
-    # cards, each placed in the location most of its pictures (else movies) belong to
     by_id = {(r.tag, r.rid): r for r in resources}
     cards = {}
     for cid in sorted(set(card_pics) | set(card_movs) | set(card_draws) | set(card_name_idx)):
@@ -379,13 +418,55 @@ def load_area(game_dir, files, title=""):
         c.draws = sorted(card_draws.get(cid, ()))
         i = card_name_idx.get(cid, -1)
         c.name = card_names[i] if 0 <= i < len(card_names) else ""
-        locs = [by_id[(R.TBMP, p)].loc for _, p, _ in c.pics if (R.TBMP, p) in by_id] \
-            or [by_id[(R.TMOV, m)].loc for _, m, _ in c.movs if (R.TMOV, m) in by_id]
-        named = [x for x in locs if x != SHARED and not x.startswith(OTHER)]
-        pick = named or locs
-        c.loc = max(set(pick), key=pick.count) if pick else OTHER + "empty"
+        c.loc = OTHER + "empty"
         cards[cid] = c
+    assign_locations(resources, cards, by_id, stack)
     return archives, resources, cards
+
+
+def is_named(loc):
+    return loc != SHARED and not loc.startswith(OTHER)
+
+
+def assign_locations(resources, cards, by_id, stack=""):
+    """Give every card a location (what most of its items are, or its own name's rule), then give items the
+    rules couldn't name the location of the card their file name points at ("15_tdd_mg_1" -> card 15), else of
+    the cards that use them."""
+    def items_of(c):
+        keys = [(R.TBMP, p) for _, p, _ in c.pics] + [(R.TBMP, p) for p, _ in c.draws] + \
+               [(R.TMOV, m) for _, m, _ in c.movs]
+        return [by_id[k] for k in dict.fromkeys(keys) if k in by_id]
+
+    def place_cards():
+        for c in cards.values():
+            locs = [i.loc for i in items_of(c)]
+            pick = [x for x in locs if is_named(x)] or locs
+            c.loc = collections.Counter(pick).most_common(1)[0][0] if pick else OTHER + "empty"
+            for pat, lbl in CARD_NAME_RULES.get(stack, []):
+                if re.match(pat, c.name):
+                    c.loc = lbl
+
+    for _ in range(3):
+        place_cards()
+        moved = False
+        for r in resources:
+            if is_named(r.loc) or r.loc == SHARED:
+                continue
+            votes = collections.Counter()
+            m = re.match(r"([0-9]+)_", r.name)
+            home = cards.get(int(m.group(1))) if m else None
+            if home and is_named(home.loc):
+                votes[home.loc] += 3
+            for cid in r.card_ids:
+                c = cards.get(cid)
+                if c and is_named(c.loc):
+                    votes[c.loc] += 1
+            if votes:
+                r.loc = votes.most_common(1)[0][0]
+                moved = True
+        if not moved:
+            break
+    place_cards()
 
 
 def tbmp_size(data):
@@ -540,13 +621,21 @@ class App:
         fm.add_command(label="Export listed items (originals)...", command=lambda: self.export_area(True))
         fm.add_command(label="Stage changes from folder...", command=self.stage_folder)
         fm.add_separator()
-        fm.add_command(label="Open game folder", command=lambda: os.startfile(self.game_dir))
+        fm.add_command(label="Export card as layers or folder...", command=self.export_card)
+        fm.add_command(label="Import card from layered file (PSD / ORA)...", command=self.import_card_layers)
+        fm.add_command(label="Import card from folder of images...", command=self.import_card_folder)
         fm.add_separator()
-        self.dark = tk.BooleanVar(value=bool(load_settings().get("dark", False)))
-        fm.add_checkbutton(label="Dark mode", variable=self.dark, command=self.toggle_dark)
+        fm.add_command(label="Open game folder", command=lambda: os.startfile(self.game_dir))
         fm.add_separator()
         fm.add_command(label="Quit", command=root.destroy)
         menu.add_cascade(label="File", menu=fm)
+        pm = tk.Menu(menu, tearoff=0)
+        prefs = load_settings()
+        self.dark = tk.BooleanVar(value=bool(prefs.get("dark", False)))
+        pm.add_checkbutton(label="Dark mode", variable=self.dark, command=self.toggle_dark)
+        self.extra = tk.BooleanVar(value=bool(prefs.get("extra_info", False)))
+        pm.add_checkbutton(label="Show extra info (file paths)", variable=self.extra, command=self.toggle_extra)
+        menu.add_cascade(label="Preferences", menu=pm)
         im = tk.Menu(menu, tearoff=0)
         im.add_command(label="Add ID labels to this island (images)", command=lambda: self.id_labels_add(False))
         im.add_command(label="Add ID labels to this island (images + movies, slow)",
@@ -614,7 +703,7 @@ class App:
         left = ttk.Frame(pw)
         cols = ("id", "loc", "name", "cards", "status")
         self.tree = ttk.Treeview(left, columns=cols, show="headings", selectmode="browse")
-        self.sort_col, self.sort_dir = None, None  # click a header: default -> descending -> ascending -> default
+        self.sort_col, self.sort_dir = None, None  # click a header: default -> ascending -> descending -> default
         for c, w, t in zip(cols, (55, 140, 150, 120, 130), ("ID", "Location", "Name", "Used on cards", "Status")):
             self.tree.heading(c, text=t, command=lambda c=c: self.on_sort(c))
             self.tree.column(c, width=w, stretch=(c in ("loc", "name", "cards")), anchor="e" if c == "id" else "w")
@@ -666,6 +755,8 @@ class App:
         self.item_cb = ttk.Combobox(ir, state="readonly", width=46)
         self.item_cb.pack(side="left", padx=3)
         self.item_cb.bind("<<ComboboxSelected>>", lambda e: self.on_item_choice())
+        ttk.Button(ir, text="Export card...", command=self.export_card).pack(side="left", padx=(8, 2))
+        ttk.Button(ir, text="Import card...", command=self.import_card_layers).pack(side="left", padx=2)
 
         self.canvas = tk.Canvas(right, bg="#202020", highlightthickness=0)
         self.canvas.pack(fill="both", expand=True)
@@ -714,6 +805,15 @@ class App:
         set_titlebar_dark(self.root, dark)
         set_help_dark(dark)
 
+    def toggle_extra(self):
+        save_settings(extra_info=self.extra.get())
+        self.set_status(self.status.cget("text"))  # re-scrub what's showing
+        self.update_info()
+
+    def with_path(self, label, path):
+        """'Saved' alone, or 'Saved <path>' when Show extra info is on (for streaming without file paths)."""
+        return f"{label} {path}" if self.extra.get() else label
+
     def toggle_dark(self):
         save_settings(dark=self.dark.get())
         self.apply_theme()
@@ -749,11 +849,12 @@ class App:
         self.q.put(lambda: self.set_status(text))
 
     def set_status(self, text):
-        self.status.config(text=text)
+        self.status.config(text=text if self.extra.get() else scrub_paths(text, self.game_dir))
 
     def show_error(self, e):
         self.set_busy(False)
-        messagebox.showerror("Riven Mod Tool", f"{type(e).__name__}: {e}")
+        msg = f"{type(e).__name__}: {e}"
+        messagebox.showerror("Riven Mod Tool", msg if self.extra.get() else scrub_paths(msg, self.game_dir))
 
     def set_busy(self, busy, text=None):
         self.busy = busy
@@ -932,11 +1033,11 @@ class App:
     SORT_COLS = ("id", "loc", "name", "cards", "status")
 
     def on_sort(self, col):
-        """Header click: default -> descending -> ascending -> default. Another column starts over."""
+        """Header click: default -> ascending -> descending -> default. Another column starts over."""
         if col != self.sort_col:
-            self.sort_col, self.sort_dir = col, "desc"
-        elif self.sort_dir == "desc":
-            self.sort_dir = "asc"
+            self.sort_col, self.sort_dir = col, "asc"
+        elif self.sort_dir == "asc":
+            self.sort_dir = "desc"
         else:
             self.sort_col, self.sort_dir = None, None
         self.refresh_list()
@@ -1090,7 +1191,7 @@ class App:
             parts.append(f"{self.duration:.1f}s")
         parts.append(f"used on cards: {', '.join(r.cards)}" if r.cards else "not drawn by any card (engine code)")
         st = self.staged.get(r.key())
-        line2 = ("Staged: revert to original" if st == REVERT else f"Staged: {st}" if st
+        line2 = ("Staged: revert to original" if st == REVERT else "Staged: " + self.with_path("new file", st) if st
                  else "ID label (test marker, see the ID mode menu)" if r.label
                  else "Patched in game" if r.patched else "Original")
         if self.placed() and self.place_rect and self.images:
@@ -1634,7 +1735,7 @@ class App:
                                                filetypes=[("PNG", "*.png")])
             if out:
                 self.get_image(r, which).save(out)
-                self.set_status(f"Saved {out}")
+                self.set_status(self.with_path("Saved", out))
         else:
             out = filedialog.asksaveasfilename(initialfile=out_name(r, ".mp4"), defaultextension=".mp4",
                                                filetypes=[("MP4 for video editors", "*.mp4"),
@@ -1650,7 +1751,7 @@ class App:
                     R.mov_to_mp4(src, out)
                 return out
             self.set_busy(True, f"Exporting {os.path.basename(out)}...")
-            self.run_bg(job, lambda o: self.set_busy(False, f"Saved {o}"))
+            self.run_bg(job, lambda o: self.set_busy(False, self.with_path("Saved", o)))
 
     def export_area(self, originals):
         tag = self.kind.get().encode()
@@ -1710,7 +1811,11 @@ class App:
                 json.dump(manifest, f, indent=0)
             return len(written)
         self.set_busy(True, f"Exporting {what}...")
-        self.run_bg(job, lambda n: (self.set_busy(False, f"Exported {n} file(s) to {folder}"), os.startfile(folder)))
+        def done(n):
+            self.set_busy(False, self.with_path(f"Exported {n} file(s)", "to " + folder))
+            if self.extra.get():  # Explorer would show the folder path on screen
+                os.startfile(folder)
+        self.run_bg(job, done)
 
     # ---------------------------------------------------------------- apply
     def apply_staged(self):
@@ -1788,6 +1893,259 @@ class App:
             self.load_all(keep_sel=self.sel.key() if self.sel else None)
         self.set_busy(True, "Applying...")
         self.run_bg(job, done)
+
+    # ---------------------------------------------------------------- whole-card layered editing
+    def card_for_io(self):
+        """The card to export/import: the one picked in Cards mode, else the one shown for the selected item."""
+        if self.cur_card:
+            return self.cur_card
+        if self.sel and self.place_cids:
+            cid = self.place_cids[max(0, self.card_cb.current())]
+            return self.area_cards.get(self.sel.area, {}).get(cid)
+        return None
+
+    def card_layer_specs(self, card):
+        """A card's images, bottom to top, with where the game draws each: [(Res, x, y, label, visible)].
+        Full-screen pictures (the card's states) go first, then overlays, then script-drawn images. Only the first
+        full-screen picture and the first overlay at each spot start visible; every layer is exported either way."""
+        full = (0, 0, SCREEN_W, SCREEN_H)
+        ordered = [p for p in card.pics if p[2] == full] + [p for p in card.pics if p[2] != full]
+        entries = [(f"Picture {idx}", pid, rect[0], rect[1], rect == full) for idx, pid, rect in ordered]
+        entries += [("Script image", pid, xy[0], xy[1], False) for pid, xy in card.draws]
+        specs, seen, spots, shown_full = [], set(), set(), False
+        for what, pid, x, y, is_full in entries:
+            r = self.res_by.get((card.area, R.TBMP, pid))
+            if r is None or pid in seen:
+                continue
+            seen.add(pid)
+            if is_full:
+                visible, shown_full = not shown_full, True
+            elif what == "Script image":
+                visible = False
+            else:
+                visible = (x, y) not in spots
+                spots.add((x, y))
+            specs.append((r, x, y, f"#{pid} {r.name} [{what}]".replace("  ", " "), visible))
+        if specs and not any(sp[4] for sp in specs):
+            specs[0] = specs[0][:4] + (True,)
+        return specs
+
+    def card_image(self, r):
+        """The image as it is in the game now (an ID label counts as the original: labels are only markers)."""
+        return self.get_image(r, "cur" if r.patched and not r.label else "orig")
+
+    def ask_card_export(self):
+        """Small dialog: which format, and whether to add movie reference layers. Returns (format, movies) or None."""
+        dlg = tk.Toplevel(self.root)
+        dlg.title("Export card")
+        dlg.transient(self.root)
+        dlg.resizable(False, False)
+        dlg.configure(background=ttk.Style().lookup("TFrame", "background") or self.root.cget("background"))
+        dlg.geometry(f"+{self.root.winfo_rootx() + 120}+{self.root.winfo_rooty() + 120}")
+        fmt, mov, result = tk.StringVar(value="psd"), tk.BooleanVar(value=False), {}
+        f = ttk.Frame(dlg, padding=16)
+        f.pack(fill="both", expand=True)
+        ttk.Label(f, text="Save this card's images as:").pack(anchor="w")
+        for val, title, note in (
+                ("psd", "Photoshop file (.psd)", "Layers at their real positions. Also opens in GIMP, Krita, Affinity."),
+                ("ora", "OpenRaster file (.ora)", "GIMP and Krita open it natively."),
+                ("folder", "Folder of PNG files", "Works in any editor; each image is its own file.")):
+            ttk.Radiobutton(f, text=title, variable=fmt, value=val).pack(anchor="w", pady=(8, 0))
+            ttk.Label(f, text=note, foreground=DARK["muted"] if self.dark.get() else "#666666").pack(anchor="w", padx=(24, 0))
+        mv = ttk.Checkbutton(f, text="Add the card's movies as hidden reference layers (first frame, not imported back)",
+                             variable=mov)
+        mv.pack(anchor="w", pady=(12, 0))
+
+        def sync(*_):
+            mv.state(["!disabled"] if fmt.get() != "folder" else ["disabled"])
+        fmt.trace_add("write", sync)
+
+        def ok():
+            result["v"] = (fmt.get(), bool(mov.get()) and fmt.get() != "folder")
+            dlg.destroy()
+        bar = ttk.Frame(f)
+        bar.pack(fill="x", pady=(16, 0))
+        ttk.Button(bar, text="Cancel", command=dlg.destroy).pack(side="right")
+        ttk.Button(bar, text="Choose where to save...", command=ok).pack(side="right", padx=6)
+        set_titlebar_dark(dlg, self.dark.get())
+        dlg.grab_set()
+        dlg.wait_window()
+        return result.get("v")
+
+    def export_card(self):
+        if self.busy:
+            return
+        card = self.card_for_io()
+        if not card:
+            messagebox.showinfo("Riven Mod Tool", "Pick a card first: switch to Cards mode and select one, or select "
+                                "an image and turn on Show on card.")
+            return
+        specs = self.card_layer_specs(card)
+        if not specs:
+            messagebox.showinfo("Riven Mod Tool", "This card has no images to export.")
+            return
+        opts = self.ask_card_export()
+        if not opts:
+            return
+        fmt, movies = opts
+        base = f"card_{card.cid}" + (f"_{R._safe(card.name)}" if card.name else "")
+        if fmt == "folder":
+            dest = filedialog.askdirectory(title=f"Folder for card {card.cid}'s images")
+        else:
+            dest = filedialog.asksaveasfilename(
+                title=f"Save card {card.cid}", initialfile=base + "." + fmt, defaultextension="." + fmt,
+                filetypes=[("Photoshop" if fmt == "psd" else "OpenRaster", "*." + fmt)])
+        if not dest:
+            return
+
+        def job():
+            layers = [{"name": label, "image": self.card_image(r), "x": x, "y": y, "visible": vis}
+                      for r, x, y, label, vis in specs]
+            if movies:
+                for _, mid, (x, y) in card.movs:
+                    r = self.res_by.get((card.area, R.TMOV, mid))
+                    if not r:
+                        continue
+                    frame = grab_frame(self.movie_file(r, "orig"), 0.0)
+                    if frame is None:
+                        continue
+                    sx, sy = self.movie_display_scale(r)
+                    if (sx, sy) != (1.0, 1.0):
+                        frame = frame.resize((max(1, round(frame.width * sx)), max(1, round(frame.height * sy))),
+                                             Image.NEAREST)
+                    layers.insert(0, {"name": f"REF movie #{mid} {r.name} (not imported)".replace("  ", " "),
+                                      "image": frame, "x": x, "y": y, "visible": False})
+                layers.sort(key=lambda L: not L["name"].startswith("REF "))   # references go below the images
+            size = (SCREEN_W, SCREEN_H)
+            if fmt == "psd":
+                LY.write_psd(dest, size, layers)
+            elif fmt == "ora":
+                LY.write_ora(dest, size, layers)
+            else:
+                lines = [f"Card {card.cid} {card.name}", "id, x, y, width, height, name"]
+                for (r, x, y, label, vis), L in zip(specs, layers):
+                    L["image"].save(os.path.join(dest, out_name(r, ".png")))
+                    lines.append(f"{r.rid}, {x}, {y}, {L['image'].width}, {L['image'].height}, {r.name}")
+                LY.flatten(size, layers).save(os.path.join(dest, "_preview.png"))
+                with open(os.path.join(dest, "_layout.txt"), "w") as fh:
+                    fh.write("\n".join(lines) + "\n")
+            return len(specs)
+        self.set_busy(True, f"Exporting card {card.cid}...")
+        self.run_bg(job, lambda n: (self.set_busy(False, self.with_path(f"Exported {n} images of card {card.cid}",
+                                                                          "to " + dest)),
+                                    os.startfile(os.path.dirname(dest) if fmt != "folder" else dest)
+                                    if self.extra.get() else None))
+
+    def plan_card_import(self, card, layers=None, files=None):
+        """Work out which images changed. layers: [layer dict] from a PSD/ORA; files: {id: image path} from a folder.
+        Returns (changed [(Res, new image)], report lines). A layer replaces the image it is named for ("#466 ..."),
+        positioned relative to where the game draws that image; transparent areas keep what's in the game now."""
+        items = {r.rid: (r, x, y) for r, x, y, _, _ in self.card_layer_specs(card)}
+        changed, unchanged, report = [], 0, []
+        found = {}
+        ignored, unknown, notes = [], [], []
+        if layers is not None:
+            for lay in layers:
+                m = re.match(r"\s*#(\d+)\b", lay["name"])
+                if not m:
+                    if not lay["name"].startswith("REF "):
+                        ignored.append(lay["name"])
+                    continue
+                rid = int(m.group(1))
+                if rid not in items:
+                    unknown.append(lay["name"])
+                    continue
+                if rid in found:
+                    notes.append(f"two layers are named #{rid}; using the upper one")
+                found[rid] = lay
+                notes += [f"{lay['name']}: {w}" for w in lay.get("warnings", [])]
+        else:
+            for rid, path in files.items():
+                if rid not in items:
+                    unknown.append(os.path.basename(path))
+                    continue
+                found[rid] = path
+        for rid, src in found.items():
+            r, px, py = items[rid]
+            base = self.card_image(r).convert("RGB")
+            if layers is not None:
+                canvas = Image.new("RGBA", base.size, (0, 0, 0, 0))
+                canvas.paste(src["image"].convert("RGBA"), (src["x"] - px, src["y"] - py))
+                new = Image.alpha_composite(base.convert("RGBA"), canvas).convert("RGB")
+            else:
+                new = Image.open(src).convert("RGB")
+                if new.size != base.size:
+                    notes.append(f"{os.path.basename(src)}: size {new.width}x{new.height}, needs "
+                                 f"{base.width}x{base.height} (skipped)")
+                    continue
+            if new.tobytes() == base.tobytes():
+                unchanged += 1
+            else:
+                changed.append((r, new))
+        report.append(f"{len(changed)} changed, {unchanged} unchanged.")
+        if ignored:
+            report.append(f"{len(ignored)} layer(s) not matched to an image were ignored (new layers aren't imported "
+                          "on their own: merge them into the image's layer first): " + ", ".join(ignored[:6])
+                          + (" ..." if len(ignored) > 6 else ""))
+        if unknown:
+            report.append(f"{len(unknown)} item(s) aren't on card {card.cid}: " + ", ".join(unknown[:6])
+                          + (" ..." if len(unknown) > 6 else ""))
+        report += sorted(set(notes))[:8]
+        return changed, report
+
+    def stage_card_import(self, card, source, result):
+        changed, report = result
+        folder = os.path.join(CACHE_DIR, "imports")
+        os.makedirs(folder, exist_ok=True)
+        for r, img in changed:
+            path = os.path.join(folder, f"card{card.cid}_{r.rid}.png")
+            img.save(path)
+            self.staged[r.key()] = path
+        self.set_busy(False, self.with_path(f"Staged {len(changed)} image(s)", "from " + source))
+        self.refresh_list()
+        if self.sel:
+            self.stage_refresh(self.sel)
+        messagebox.showinfo("Riven Mod Tool", f"Card {card.cid}: " + "\n".join(report)
+                            + ("\n\nThey're staged: Apply staged writes them to the game." if changed else ""))
+
+    def import_card_layers(self):
+        if self.busy:
+            return
+        card = self.card_for_io()
+        if not card:
+            messagebox.showinfo("Riven Mod Tool", "Pick the card first: switch to Cards mode and select it.")
+            return
+        path = filedialog.askopenfilename(title=f"Layered file for card {card.cid}",
+                                          filetypes=[("Layered images", "*.psd *.ora"), ("All files", "*.*")])
+        if not path:
+            return
+
+        def job():
+            _, layers = LY.read_layers(path)
+            return self.plan_card_import(card, layers=layers)
+        self.set_busy(True, self.with_path("Reading the layered file", os.path.basename(path)) + "...")
+        self.run_bg(job, lambda res: self.stage_card_import(card, os.path.basename(path), res))
+
+    def import_card_folder(self):
+        if self.busy:
+            return
+        card = self.card_for_io()
+        if not card:
+            messagebox.showinfo("Riven Mod Tool", "Pick the card first: switch to Cards mode and select it.")
+            return
+        folder = filedialog.askdirectory(title=f"Folder of images for card {card.cid} (named <id>_anything.png)")
+        if not folder:
+            return
+
+        def job():
+            files = {}
+            for fn in sorted(os.listdir(folder)):
+                m = re.match(r"(\d+)", fn)
+                if m and os.path.splitext(fn)[1].lower() in R.IMAGE_EXTS:
+                    files[int(m.group(1))] = os.path.join(folder, fn)
+            return self.plan_card_import(card, files=files)
+        self.set_busy(True, "Reading the folder...")
+        self.run_bg(job, lambda res: self.stage_card_import(card, "the folder", res))
 
     # ---------------------------------------------------------------- ID mode
     def id_labels_add(self, movies):
