@@ -330,7 +330,7 @@ class Card:
     # pics:  [(plst index, tBMP id, (left, top, right, bottom))]   picture list (states of the view)
     # draws: [(tBMP id, (left, top))]                              drawn by card/hotspot scripts
     # movs:  [(mlst index, tMOV id, (left, top))]
-    # hspts: [(left, top, right, bottom, name, enabled)]           clickable regions from HSPT resource
+    # hspts: [(left, top, right, bottom, name, enabled, frozenset(jump_card_ids))]  clickable regions from HSPT
 
 
 SCREEN_W, SCREEN_H = 608, 392   # Riven's picture area
@@ -371,8 +371,39 @@ def _script(d, p, out):
     return p
 
 
+def _jumps_in_script_list(d, p, out):
+    """Walk a script list collecting goToCard (opcode 2) destination card IDs into out."""
+    n, = struct.unpack_from(">H", d, p)
+    p += 2
+    for _ in range(n):
+        p = _jumps_in_script(d, p + 2, out)
+    return p
+
+
+def _jumps_in_script(d, p, out):
+    n, = struct.unpack_from(">H", d, p)
+    p += 2
+    for _ in range(n):
+        t, = struct.unpack_from(">H", d, p)
+        p += 2
+        if t == 8:
+            _, _, branches = struct.unpack_from(">3H", d, p)
+            p += 6
+            for _ in range(branches):
+                p = _jumps_in_script(d, p + 2, out)
+        elif t == 27:
+            p += 8
+        else:
+            argc, = struct.unpack_from(">H", d, p)
+            args = struct.unpack_from(f">{argc}H", d, p + 2)
+            p += 2 + 2 * argc
+            if t == 2 and args:
+                out.add(args[0])
+    return p
+
+
 def parse_hotspots(data, card_names=()):
-    """Parse an HSPT resource into [(left, top, right, bottom, name, enabled)] tuples.
+    """Parse an HSPT resource into [(l, t, r, b, name, enabled, frozenset(jump_card_ids))] tuples.
     card_names is the NAME resource list; name_rec -1 means no name."""
     if not data:
         return []
@@ -380,14 +411,13 @@ def parse_hotspots(data, card_names=()):
     try:
         n, = struct.unpack_from(">H", data, 0)
         p = 2
-        skip = set()
         for _ in range(n):
             # 22-byte record: blst_id(u16), name_rec(s16), l/t/r/b(4xs16), u0/cursor/index/u1/enabled(5xu16)
             blst_id, name_rec, l, t, r, b, _u0, _cur, _idx, _u1, enabled = struct.unpack_from(">HhhhhhHHHHH", data, p)
             name = card_names[name_rec] if 0 <= name_rec < len(card_names) else ""
-            out.append((l, t, r, b, name, bool(enabled)))
-            p = _script_list(data, p + 22, skip)  # advance past script list
-        skip.clear()
+            jumps = set()
+            p = _jumps_in_script_list(data, p + 22, jumps)
+            out.append((l, t, r, b, name, bool(enabled), frozenset(jumps)))
     except struct.error:
         pass
     return out
@@ -690,6 +720,7 @@ class App:
         self.gen = 0              # bumps on every area (re)load, so cached movie files never go stale
         self.busy = False
         self.swipe_x, self.swipe_geom = 0.5, None
+        self.card_draw_geom = None          # (x0, y0, s, card) set when hotspot overlay is drawn
         self.blink_on, self.blink_job, self.time_job = False, None, None
         self.duration = 0.0
         self.cache_lock = threading.Lock()
@@ -864,7 +895,7 @@ class App:
         self.canvas = tk.Canvas(right, bg="#202020", highlightthickness=0)
         self.canvas.pack(fill="both", expand=True)
         self.canvas.bind("<Configure>", lambda e: self.redraw())
-        self.canvas.bind("<Button-1>", self.on_swipe)
+        self.canvas.bind("<Button-1>", self.on_canvas_click)
         self.canvas.bind("<B1-Motion>", self.on_swipe)
 
         self.movie_bar = ttk.Frame(right)
@@ -1626,7 +1657,7 @@ class App:
     def redraw(self):
         c = self.canvas
         c.delete("all")
-        self.tk_imgs, self.swipe_geom = [], None
+        self.tk_imgs, self.swipe_geom, self.card_draw_geom = [], None, None
         if self.blink_job:
             self.root.after_cancel(self.blink_job)
             self.blink_job = None
@@ -1712,8 +1743,9 @@ class App:
                 cid = self.place_cids[max(0, self.card_cb.current())]
                 spot_card = self.area_cards.get(self.sel.area, {}).get(cid)
             if spot_card:
+                self.card_draw_geom = (x0, y0, s, spot_card)
                 cv = self.canvas
-                for hl, ht, hr, hb, hname, henabled in spot_card.hspts:
+                for hl, ht, hr, hb, hname, henabled, hjumps in spot_card.hspts:
                     col = "#40ff80" if henabled else "#808080"
                     cv.create_rectangle(x0 + hl * s, y0 + ht * s, x0 + hr * s, y0 + hb * s,
                                         outline=col, width=1)
@@ -1740,6 +1772,36 @@ class App:
         x0, iw = self.swipe_geom
         self.swipe_x = min(1.0, max(0.0, (e.x - x0) / max(1, iw)))
         self.redraw()
+
+    def on_canvas_click(self, e):
+        if self.show_spots.get() and self.card_draw_geom is not None:
+            x0, y0, s, spot_card = self.card_draw_geom
+            if s > 0:
+                img_x = (e.x - x0) / s
+                img_y = (e.y - y0) / s
+                for hl, ht, hr, hb, _hname, _henabled, hjumps in spot_card.hspts:
+                    if hl <= img_x <= hr and ht <= img_y <= hb and hjumps:
+                        self._navigate_to_card(min(hjumps), spot_card.area)
+                        return
+        self.on_swipe(e)
+
+    def _navigate_to_card(self, cid, area):
+        """Switch to CARD mode and select card cid in the given area."""
+        if self.kind.get() != "CARD":
+            self.kind.set("CARD")
+            self.on_kind()
+        target = self.area_cards.get(area, {}).get(cid)
+        if target is None:
+            return
+        iid = self.nav_iid(area, target.loc)
+        if not self.nav.exists(iid):
+            iid = f"A|{area}"
+        self.nav.selection_set(iid)
+        self.nav.see(iid)
+        row_iid = f"card|{cid}"
+        if row_iid in self.rows:
+            self.tree.selection_set(row_iid)
+            self.tree.see(row_iid)
 
     # ---------------------------------------------------------------- staging
     def stage(self, r, src):
