@@ -326,10 +326,11 @@ class Res:
 
 class Card:
     """A card ("screen"): its pictures (PLST) and movies (MLST) with their on-screen positions."""
-    __slots__ = ("cid", "name", "pics", "draws", "movs", "area", "loc")
+    __slots__ = ("cid", "name", "pics", "draws", "movs", "area", "loc", "hspts")
     # pics:  [(plst index, tBMP id, (left, top, right, bottom))]   picture list (states of the view)
     # draws: [(tBMP id, (left, top))]                              drawn by card/hotspot scripts
     # movs:  [(mlst index, tMOV id, (left, top))]
+    # hspts: [(left, top, right, bottom, name, enabled)]           clickable regions from HSPT resource
 
 
 SCREEN_W, SCREEN_H = 608, 392   # Riven's picture area
@@ -368,6 +369,28 @@ def _script(d, p, out):
             if t == 1 and args:
                 out.add((args[0], (args[1], args[2]) if argc >= 5 else (0, 0)))
     return p
+
+
+def parse_hotspots(data, card_names=()):
+    """Parse an HSPT resource into [(left, top, right, bottom, name, enabled)] tuples.
+    card_names is the NAME resource list; name_rec -1 means no name."""
+    if not data:
+        return []
+    out = []
+    try:
+        n, = struct.unpack_from(">H", data, 0)
+        p = 2
+        skip = set()
+        for _ in range(n):
+            # 22-byte record: blst_id(u16), name_rec(s16), l/t/r/b(4xs16), u0/cursor/index/u1/enabled(5xu16)
+            blst_id, name_rec, l, t, r, b, _u0, _cur, _idx, _u1, enabled = struct.unpack_from(">HhhhhhHHHHH", data, p)
+            name = card_names[name_rec] if 0 <= name_rec < len(card_names) else ""
+            out.append((l, t, r, b, name, bool(enabled)))
+            p = _script_list(data, p + 22, skip)  # advance past script list
+        skip.clear()
+    except struct.error:
+        pass
+    return out
 
 
 def card_script_draws(card_data, hspt_data):
@@ -411,7 +434,7 @@ def load_area(game_dir, files, title=""):
     """Parse an area's archives: resources, patch state, and which cards use each image/movie."""
     archives, resources = {}, []
     card_name_idx, pic_cards, mov_cards, card_names = {}, {}, {}, []
-    card_pics, card_movs, card_draws = {}, {}, {}
+    card_pics, card_movs, card_draws, card_hspts_raw = {}, {}, {}, {}
     for fn in files:
         path = os.path.join(game_dir, fn)
         if not os.path.exists(path):
@@ -428,6 +451,8 @@ def load_area(game_dir, files, title=""):
             card_data = cur.read(b"CARD", cid)
             card_name_idx[cid], = struct.unpack(">h", card_data[:2])
             hspt = cur.read(b"HSPT", cid) if cid in cur.types.get(b"HSPT", {}) else b""
+            if hspt:
+                card_hspts_raw[cid] = hspt   # resolved to Card.hspts after card_names is fully built
             for pid, xy in card_script_draws(card_data, hspt):  # images placed by scripts, not the PLST
                 pic_cards.setdefault(pid, set()).add(cid)
                 card_draws.setdefault(cid, set()).add((pid, xy))
@@ -473,6 +498,7 @@ def load_area(game_dir, files, title=""):
         c.draws = sorted(card_draws.get(cid, ()))
         i = card_name_idx.get(cid, -1)
         c.name = card_names[i] if 0 <= i < len(card_names) else ""
+        c.hspts = parse_hotspots(card_hspts_raw.get(cid, b""), card_names)
         c.loc = OTHER + "empty"
         cards[cid] = c
     assign_locations(resources, cards, by_id, stack)
@@ -822,6 +848,8 @@ class App:
         self.bg_cb.bind("<<ComboboxSelected>>", lambda e: self.reload_preview())
         self.outline = tk.BooleanVar(value=True)
         ttk.Checkbutton(pr, text="Outline", variable=self.outline, command=self.redraw).pack(side="left", padx=6)
+        self.show_spots = tk.BooleanVar(value=False)
+        ttk.Checkbutton(pr, text="Spots", variable=self.show_spots, command=self.redraw).pack(side="left", padx=6)
         self.place_row = pr
         # Cards mode only: which of the card's pictures / movies to show (own row, so nothing gets cut off)
         ir = self.item_row = ttk.Frame(right)
@@ -1677,6 +1705,23 @@ class App:
             if (l, t, r, b) != (0, 0, SCREEN_W, SCREEN_H):
                 self.canvas.create_rectangle(x0 + l * s - 1, y0 + t * s - 1, x0 + r * s, y0 + b * s,
                                              outline="#ffd040", dash=(4, 3))
+        if self.show_spots.get() and img.size == (SCREEN_W, SCREEN_H):
+            # Resolve the card whose hotspots to draw (works in both CARD mode and tBMP place mode)
+            spot_card = self.cur_card
+            if spot_card is None and self.place_cids and self.sel:
+                cid = self.place_cids[max(0, self.card_cb.current())]
+                spot_card = self.area_cards.get(self.sel.area, {}).get(cid)
+            if spot_card:
+                cv = self.canvas
+                for hl, ht, hr, hb, hname, henabled in spot_card.hspts:
+                    col = "#40ff80" if henabled else "#808080"
+                    cv.create_rectangle(x0 + hl * s, y0 + ht * s, x0 + hr * s, y0 + hb * s,
+                                        outline=col, width=1)
+                    if hname:
+                        mid_x = x0 + (hl + hr) * s / 2
+                        mid_y = y0 + (ht + hb) * s / 2
+                        cv.create_text(mid_x, mid_y, fill=col, text=hname,
+                                       font=("TkDefaultFont", 8))
         return x0, y0, iw, ih
 
     def _draw_panes(self, panes, W, H):
