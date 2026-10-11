@@ -209,6 +209,7 @@ DRIVE_PATH = re.compile("(?<![A-Za-z0-9_])[A-Za-z]:" + _SEP + "(?:[^" + _BS * 2 
 
 # ---------------------------------------------------------------- settings + theme
 SETTINGS = os.path.join(os.environ.get("APPDATA", HERE), "RivenModTool", "settings.json")
+CUSTOM_NAMES = os.path.join(os.environ.get("APPDATA", HERE), "RivenModTool", "custom_names.json")
 
 
 def load_settings():
@@ -228,6 +229,27 @@ def save_settings(**changes):
             json.dump(s, f, indent=1)
     except OSError:
         pass
+
+
+def load_custom_names():
+    try:
+        with open(CUSTOM_NAMES) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+def save_custom_names(names):
+    try:
+        os.makedirs(os.path.dirname(CUSTOM_NAMES), exist_ok=True)
+        with open(CUSTOM_NAMES, "w") as f:
+            json.dump(names, f, indent=1, sort_keys=True)
+    except OSError:
+        pass
+
+
+def note_key(r):
+    return f"{r.archive}|{r.tag.decode()}|{r.rid}"
 
 
 # list colours that stay readable on each background
@@ -318,7 +340,7 @@ def style_combobox_list(cb, dark):
 
 
 class Res:
-    __slots__ = ("archive", "tag", "rid", "name", "cards", "card_ids", "patched", "label", "area", "loc")
+    __slots__ = ("archive", "tag", "rid", "name", "note", "cards", "card_ids", "patched", "label", "area", "loc")
 
     def key(self):
         return (self.archive, self.tag, self.rid)
@@ -551,6 +573,7 @@ def load_area(game_dir, files, title=""):
                 r = Res()
                 r.archive, r.tag, r.rid = fn, tag, rid
                 r.name = orig.names.get((tag, rid), "")
+                r.note = ""   # filled in by App.load_all() from custom_names.json
                 r.patched = (tag, rid) in inplace if inplace is not None else \
                     bool(first_new and cur.types[tag][rid] >= first_new)
                 r.label = r.patched and (tag, rid) in labels
@@ -769,6 +792,7 @@ class App:
         self.busy = False
         self.swipe_x, self.swipe_geom = 0.5, None
         self.card_draw_geom = None          # (x0, y0, s, card) set when hotspot overlay is drawn
+        self.custom_names = load_custom_names()
         self.blink_on, self.blink_job, self.time_job = False, None, None
         self.duration = 0.0
         self.cache_lock = threading.Lock()
@@ -929,6 +953,8 @@ class App:
         ttk.Checkbutton(pr, text="Outline", variable=self.outline, command=self.redraw).pack(side="left", padx=6)
         self.show_spots = tk.BooleanVar(value=False)
         ttk.Checkbutton(pr, text="Spots", variable=self.show_spots, command=self.redraw).pack(side="left", padx=6)
+        self.spots_nav = tk.BooleanVar(value=True)
+        ttk.Checkbutton(pr, text="Navigate", variable=self.spots_nav).pack(side="left", padx=(0, 6))
         self.place_row = pr
         # Cards mode only: which of the card's pictures / movies to show (own row, so nothing gets cut off)
         ir = self.item_row = ttk.Frame(right)
@@ -976,7 +1002,14 @@ class App:
 
         self.info = ttk.Label(right, anchor="w", justify="left", padding=(0, 4), wraplength=1000)
         self.info.pack(fill="x")
-        btns = ttk.Frame(right)
+        nr = self.note_row = ttk.Frame(right)
+        ttk.Label(nr, text="Custom name:").pack(side="left")
+        self.note_var = tk.StringVar()
+        self.note_entry = ttk.Entry(nr, textvariable=self.note_var)
+        self.note_entry.pack(side="left", fill="x", expand=True, padx=(4, 0))
+        self.note_entry.bind("<Return>", self.on_note_save)
+        self.note_entry.bind("<FocusOut>", self.on_note_save)
+        btns = self.btns_row = ttk.Frame(right)
         btns.pack(fill="x")
         self.b_load = ttk.Button(btns, text="Load new...", command=self.load_new)
         self.b_unstage = ttk.Button(btns, text="Unstage", command=self.unstage)
@@ -1107,6 +1140,8 @@ class App:
             self.archives, self.area_res, self.area_cards, self.res_by = {}, {}, {}, {}
             for title, (arcs, resources, cards) in res.items():
                 self.archives.update(arcs)
+                for r in resources:
+                    r.note = self.custom_names.get(note_key(r), "")
                 self.area_res[title] = resources
                 self.area_cards[title] = cards
                 self.res_by.update({(title, r.tag, r.rid): r for r in resources})
@@ -1340,10 +1375,10 @@ class App:
                     or flt == "Unchanged" and (edited or staged) or flt == "ID labels" and not r.label:
                 continue
             cards = ", ".join(r.cards)
-            if q and q not in f"{r.rid} {r.name} {cards}".lower():
+            if q and q not in f"{r.rid} {r.note} {r.name} {cards}".lower():
                 continue
             rows.append((f"{r.archive}|{r.rid}", r, self.row_tags(r),
-                         (r.rid, r.loc, r.name, cards, self.status_of(r))))
+                         (r.rid, r.loc, r.note or r.name, cards, self.status_of(r))))
         self.insert_rows(rows)
         n = len(self.staged)
         self.apply_btn.config(text=f"Apply staged ({n})")
@@ -1361,7 +1396,7 @@ class App:
     def update_row(self, r):
         iid = f"{r.archive}|{r.rid}"
         if self.tree.exists(iid):
-            self.tree.item(iid, values=(r.rid, r.loc, r.name, ", ".join(r.cards), self.status_of(r)),
+            self.tree.item(iid, values=(r.rid, r.loc, r.note or r.name, ", ".join(r.cards), self.status_of(r)),
                            tags=self.row_tags(r))
         c = self.cur_card
         if c and self.tree.exists(f"card|{c.cid}"):
@@ -1393,8 +1428,13 @@ class App:
         r = self.sel
         if not r:
             self.info.config(text="")
+            self.note_row.pack_forget()
             return
+        self.note_var.set(r.note)
+        self.note_row.pack(fill="x", pady=(0, 2), before=self.btns_row)
         parts = [f"{KIND_NAMES[r.tag]} {r.rid}", r.archive]
+        if r.note:
+            parts.append(f'"{r.note}"')
         if r.name:
             parts.append(r.name)
         size = getattr(self, "item_size", None)
@@ -1430,6 +1470,23 @@ class App:
             self.pending_card = None
             return
         self.select_res(row)
+
+    def on_note_save(self, event=None):
+        r = self.sel
+        if not r:
+            return
+        text = self.note_var.get().strip()
+        if text == r.note:
+            return
+        r.note = text
+        k = note_key(r)
+        if text:
+            self.custom_names[k] = text
+        else:
+            self.custom_names.pop(k, None)
+        save_custom_names(self.custom_names)
+        self.update_row(r)
+        self.update_info()
 
     def select_res(self, r, card_id=None):
         """Show resource r; card_id = the card to show it on (Cards mode / Find in list)."""
@@ -1726,6 +1783,9 @@ class App:
         self.tk_imgs, self.swipe_geom, self.card_draw_geom = [], None, None
         if not self.show_spots.get():
             self._hide_script_bar()
+            self.canvas.configure(cursor="")
+        else:
+            self.canvas.configure(cursor="crosshair")
         if self.blink_job:
             self.root.after_cancel(self.blink_job)
             self.blink_job = None
@@ -1850,7 +1910,7 @@ class App:
                 for i, (hl, ht, hr, hb, _hname, _henabled, hjumps, hraw) in enumerate(spot_card.hspts):
                     if hl <= img_x <= hr and ht <= img_y <= hb:
                         self._show_hotspot_script(i, spot_card, hraw)
-                        if hjumps:
+                        if hjumps and self.spots_nav.get():
                             self._navigate_to_card(min(hjumps), spot_card.area)
                         return
                 self._hide_script_bar()
