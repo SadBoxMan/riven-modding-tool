@@ -330,10 +330,13 @@ class Card:
     # pics:  [(plst index, tBMP id, (left, top, right, bottom))]   picture list (states of the view)
     # draws: [(tBMP id, (left, top))]                              drawn by card/hotspot scripts
     # movs:  [(mlst index, tMOV id, (left, top))]
-    # hspts: [(left, top, right, bottom, name, enabled, frozenset(jump_card_ids))]  clickable regions from HSPT
+    # hspts: [(l, t, r, b, name, enabled, frozenset(jump_card_ids), raw_scripts)]  clickable regions from HSPT
 
 
 SCREEN_W, SCREEN_H = 608, 392   # Riven's picture area
+
+SCRIPT_EVENTS = {1: "mouseDown", 2: "mouseDrag", 3: "mouseUp", 4: "mouseEnter", 5: "mouseLeave"}
+SCRIPT_OPCODES = {1: "drawBitmap", 2: "goToCard", 8: "switch", 27: "changeStack"}
 
 
 # Riven scripts (engines/mohawk/riven_scripts.cpp): a script list is u16 count + (u16 type, script);
@@ -402,8 +405,52 @@ def _jumps_in_script(d, p, out):
     return p
 
 
+def _fmt_script_list(raw):
+    """Decode raw script-list bytes, return list of (event_name, [cmd_line]) pairs."""
+    result = []
+    try:
+        d, p = raw, 0
+        n, = struct.unpack_from(">H", d, p); p += 2
+        for _ in range(n):
+            ev, = struct.unpack_from(">H", d, p); p += 2
+            lines, p = _fmt_script(d, p, 0)
+            result.append((SCRIPT_EVENTS.get(ev, f"event{ev}"), lines))
+    except struct.error:
+        pass
+    return result
+
+
+def _fmt_script(d, p, depth):
+    """Decode one script body (command count + commands); return (lines, end_pos)."""
+    indent = "  " * depth
+    lines = []
+    try:
+        n, = struct.unpack_from(">H", d, p); p += 2
+        for _ in range(n):
+            t, = struct.unpack_from(">H", d, p); p += 2
+            if t == 8:
+                _, var_id, branches = struct.unpack_from(">3H", d, p); p += 6
+                lines.append(f"{indent}switch(var{var_id}):")
+                for _ in range(branches):
+                    val, = struct.unpack_from(">H", d, p); p += 2
+                    sub, p = _fmt_script(d, p, depth + 1)
+                    lines.append(f"{indent}  [{val}]:")
+                    lines.extend(sub)
+            elif t == 27:
+                _, stack_id, gid = struct.unpack_from(">HHI", d, p); p += 8
+                lines.append(f"{indent}changeStack(stack={stack_id}, gid=0x{gid:08x})")
+            else:
+                argc, = struct.unpack_from(">H", d, p)
+                args = struct.unpack_from(f">{argc}H", d, p + 2); p += 2 + 2 * argc
+                name = SCRIPT_OPCODES.get(t, f"op{t}")
+                lines.append(f"{indent}{name}({', '.join(str(a) for a in args)})")
+    except struct.error:
+        pass
+    return lines, p
+
+
 def parse_hotspots(data, card_names=()):
-    """Parse an HSPT resource into [(l, t, r, b, name, enabled, frozenset(jump_card_ids))] tuples.
+    """Parse HSPT into [(l, t, r, b, name, enabled, frozenset(jump_card_ids), raw_scripts)] tuples.
     card_names is the NAME resource list; name_rec -1 means no name."""
     if not data:
         return []
@@ -415,9 +462,10 @@ def parse_hotspots(data, card_names=()):
             # 22-byte record: blst_id(u16), name_rec(s16), l/t/r/b(4xs16), u0/cursor/index/u1/enabled(5xu16)
             blst_id, name_rec, l, t, r, b, _u0, _cur, _idx, _u1, enabled = struct.unpack_from(">HhhhhhHHHHH", data, p)
             name = card_names[name_rec] if 0 <= name_rec < len(card_names) else ""
+            script_start = p + 22
             jumps = set()
-            p = _jumps_in_script_list(data, p + 22, jumps)
-            out.append((l, t, r, b, name, bool(enabled), frozenset(jumps)))
+            p = _jumps_in_script_list(data, script_start, jumps)
+            out.append((l, t, r, b, name, bool(enabled), frozenset(jumps), data[script_start:p]))
     except struct.error:
         pass
     return out
@@ -898,6 +946,21 @@ class App:
         self.canvas.bind("<Button-1>", self.on_canvas_click)
         self.canvas.bind("<B1-Motion>", self.on_swipe)
 
+        # Script viewer panel (hidden until a hotspot is clicked while Spots is on)
+        sb = self.script_bar = ttk.Frame(right)
+        self.script_bar_title = ttk.Label(sb, anchor="w", padding=(4, 2))
+        self.script_bar_title.pack(fill="x")
+        st = ttk.Frame(sb)
+        st.pack(fill="both", expand=True)
+        self.script_text = tk.Text(st, height=6, wrap="none", font=("Courier New", 8),
+                                   state="disabled", relief="flat", bd=0, cursor="arrow")
+        sb_sy = ttk.Scrollbar(st, orient="vertical", command=self.script_text.yview)
+        sb_sx = ttk.Scrollbar(sb, orient="horizontal", command=self.script_text.xview)
+        self.script_text.configure(yscrollcommand=sb_sy.set, xscrollcommand=sb_sx.set)
+        sb_sy.pack(side="right", fill="y")
+        self.script_text.pack(side="left", fill="both", expand=True)
+        sb_sx.pack(fill="x")
+
         self.movie_bar = ttk.Frame(right)
         ttk.Label(self.movie_bar, text="Time").pack(side="left")
         self.time = tk.DoubleVar(value=0)
@@ -938,6 +1001,9 @@ class App:
             style_combobox_list(cb, dark)
         set_titlebar_dark(self.root, dark)
         set_help_dark(dark)
+        sbg = "#1e1e1e" if dark else "#f0f0f0"
+        sfg = "#c8d8e8" if dark else "#1a1a1a"
+        self.script_text.configure(bg=sbg, fg=sfg, insertbackground=sfg, selectbackground="#3a5a8a")
 
     def loc_key(self, area, loc):
         """Sort key for a location: playthrough order, or plain alphabetical (Preferences)."""
@@ -1658,6 +1724,8 @@ class App:
         c = self.canvas
         c.delete("all")
         self.tk_imgs, self.swipe_geom, self.card_draw_geom = [], None, None
+        if not self.show_spots.get():
+            self._hide_script_bar()
         if self.blink_job:
             self.root.after_cancel(self.blink_job)
             self.blink_job = None
@@ -1745,7 +1813,7 @@ class App:
             if spot_card:
                 self.card_draw_geom = (x0, y0, s, spot_card)
                 cv = self.canvas
-                for hl, ht, hr, hb, hname, henabled, hjumps in spot_card.hspts:
+                for hl, ht, hr, hb, hname, henabled, hjumps, _hraw in spot_card.hspts:
                     col = "#40ff80" if henabled else "#808080"
                     cv.create_rectangle(x0 + hl * s, y0 + ht * s, x0 + hr * s, y0 + hb * s,
                                         outline=col, width=1)
@@ -1779,10 +1847,13 @@ class App:
             if s > 0:
                 img_x = (e.x - x0) / s
                 img_y = (e.y - y0) / s
-                for hl, ht, hr, hb, _hname, _henabled, hjumps in spot_card.hspts:
-                    if hl <= img_x <= hr and ht <= img_y <= hb and hjumps:
-                        self._navigate_to_card(min(hjumps), spot_card.area)
+                for i, (hl, ht, hr, hb, _hname, _henabled, hjumps, hraw) in enumerate(spot_card.hspts):
+                    if hl <= img_x <= hr and ht <= img_y <= hb:
+                        self._show_hotspot_script(i, spot_card, hraw)
+                        if hjumps:
+                            self._navigate_to_card(min(hjumps), spot_card.area)
                         return
+                self._hide_script_bar()
         self.on_swipe(e)
 
     def _navigate_to_card(self, cid, area):
@@ -1802,6 +1873,36 @@ class App:
         if row_iid in self.rows:
             self.tree.selection_set(row_iid)
             self.tree.see(row_iid)
+
+    def _show_hotspot_script(self, idx, card, raw_scripts):
+        """Decode and display the script panel for hotspot idx on card."""
+        hs = card.hspts[idx]
+        hl, ht, hr, hb, hname, henabled, hjumps, _ = hs
+        title_parts = [f"Hotspot {idx}"]
+        if hname:
+            title_parts.append(hname)
+        title_parts.append(f"rect({hl},{ht},{hr},{hb})")
+        title_parts.append("enabled" if henabled else "disabled")
+        self.script_bar_title.configure(text="  ·  ".join(title_parts))
+
+        events = _fmt_script_list(raw_scripts)
+        lines = []
+        if not events:
+            lines = ["(no scripts)"]
+        for ev_name, cmds in events:
+            lines.append(f"on {ev_name}:")
+            lines.extend(f"  {c}" for c in cmds) if cmds else lines.append("  (empty)")
+        text = "\n".join(lines)
+
+        t = self.script_text
+        t.configure(state="normal")
+        t.delete("1.0", "end")
+        t.insert("1.0", text)
+        t.configure(state="disabled")
+        self.script_bar.pack(fill="x", pady=(2, 0), before=self.info)
+
+    def _hide_script_bar(self):
+        self.script_bar.pack_forget()
 
     # ---------------------------------------------------------------- staging
     def stage(self, r, src):
