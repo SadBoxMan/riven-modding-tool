@@ -842,6 +842,10 @@ class App:
         self.swipe_x, self.swipe_geom = 0.5, None
         self.card_draw_geom = None          # (x0, y0, s, card) set when hotspot overlay is drawn
         self.custom_names = load_custom_names()
+        prefs_nav = load_settings()
+        self.area_order: list = prefs_nav.get("area_order", [])      # custom area order (titles)
+        self.loc_order_custom: dict = prefs_nav.get("loc_order_custom", {})  # area title → [loc names]
+        self.nav_drag_iid = None    # iid being dragged in the nav tree
         self.blink_on, self.blink_job, self.time_job = False, None, None
         self.duration = 0.0
         self.cache_lock = threading.Lock()
@@ -894,6 +898,8 @@ class App:
                            value="progress", command=self.toggle_order)
         pm.add_radiobutton(label="Order locations alphabetically", variable=self.loc_order,
                            value="alpha", command=self.toggle_order)
+        pm.add_separator()
+        pm.add_command(label="Reset nav panel order to default", command=self.reset_nav_order)
         menu.add_cascade(label="Preferences", menu=pm)
         im = tk.Menu(menu, tearoff=0)
         im.add_command(label="Add ID labels to this island (images)", command=lambda: self.id_labels_add(False))
@@ -957,6 +963,10 @@ class App:
         self.nav.pack(side="left", fill="both", expand=True)
         nsb.pack(side="left", fill="y")
         self.nav.bind("<<TreeviewSelect>>", self.on_nav)
+        self.nav.tag_configure("drag_target", background="#4080d0")
+        self.nav.bind("<ButtonPress-1>", self._nav_drag_start, add=True)
+        self.nav.bind("<B1-Motion>", self._nav_drag_motion, add=True)
+        self.nav.bind("<ButtonRelease-1>", self._nav_drag_end, add=True)
         pw.add(nav, weight=1)
 
         left = ttk.Frame(pw)
@@ -1092,6 +1102,7 @@ class App:
         sbg = "#1e1e1e" if dark else "#f0f0f0"
         sfg = "#c8d8e8" if dark else "#1a1a1a"
         self.script_text.configure(bg=sbg, fg=sfg, insertbackground=sfg, selectbackground="#3a5a8a")
+        self.nav.tag_configure("drag_target", background="#1a4a8a" if dark else "#4080d0")
 
     def loc_key(self, area, loc):
         """Sort key for a location: playthrough order, or plain alphabetical (Preferences)."""
@@ -1101,6 +1112,108 @@ class App:
         save_settings(loc_order=self.loc_order.get())
         self.build_nav()
         self.refresh_list()
+
+    def reset_nav_order(self):
+        self.area_order, self.loc_order_custom = [], {}
+        save_settings(area_order=[], loc_order_custom={})
+        self.build_nav()
+
+    def _save_nav_order(self):
+        save_settings(area_order=self.area_order, loc_order_custom=self.loc_order_custom)
+
+    def _nav_current_areas(self):
+        """Ordered list of area iids currently in the nav tree."""
+        return list(self.nav.get_children())
+
+    def _nav_drag_start(self, e):
+        iid = self.nav.identify_row(e.y)
+        if not iid:
+            return
+        prefix = iid.split("|")[0]
+        if prefix in ("A", "L"):
+            self.nav_drag_iid = iid
+            self.nav.configure(cursor="sb_v_double_arrow")
+
+    def _nav_drag_motion(self, e):
+        if not self.nav_drag_iid:
+            return
+        target = self.nav.identify_row(e.y)
+        for tagged in list(self.nav.tag_has("drag_target")):
+            tags = [t for t in self.nav.item(tagged, "tags") if t != "drag_target"]
+            self.nav.item(tagged, tags=tags)
+        if target and target != self.nav_drag_iid:
+            tags = list(self.nav.item(target, "tags")) + ["drag_target"]
+            self.nav.item(target, tags=tags)
+
+    def _nav_drag_end(self, e):
+        # Clear highlight from any drag_target-tagged items
+        for tagged in list(self.nav.tag_has("drag_target")):
+            tags = [t for t in self.nav.item(tagged, "tags") if t != "drag_target"]
+            self.nav.item(tagged, tags=tags)
+        self.nav.configure(cursor="")
+        drag_iid = self.nav_drag_iid
+        self.nav_drag_iid = None
+        if not drag_iid:
+            return
+        target = self.nav.identify_row(e.y)
+        if not target or target == drag_iid:
+            return
+        drag_prefix = drag_iid.split("|")[0]
+        tgt_prefix = target.split("|")[0]
+        # Area reorder: drag an "A|..." to another "A|..."
+        if drag_prefix == "A" and tgt_prefix == "A":
+            self._reorder_area(drag_iid, target, e.y)
+        # Location reorder: drag an "L|..." to "L|..." or "A|..." within same parent
+        elif drag_prefix == "L":
+            drag_parent = self.nav.parent(drag_iid)
+            tgt_parent = self.nav.parent(target) if tgt_prefix == "L" else target
+            if drag_parent == tgt_parent or (tgt_prefix == "A" and target == drag_parent):
+                self._reorder_loc(drag_iid, target, e.y)
+
+    def _reorder_area(self, drag_iid, target_iid, y):
+        """Move drag_iid before or after target_iid among top-level areas."""
+        children = list(self.nav.get_children())
+        if drag_iid not in children or target_iid not in children:
+            return
+        row_bbox = self.nav.bbox(target_iid)
+        insert_after = row_bbox and y > row_bbox[1] + row_bbox[3] // 2
+        children.remove(drag_iid)
+        idx = children.index(target_iid)
+        children.insert(idx + (1 if insert_after else 0), drag_iid)
+        # Reorder in tree
+        for pos, iid in enumerate(children):
+            self.nav.move(iid, "", pos)
+        # Persist: convert iids to area titles
+        self.area_order = [iid.split("|", 1)[1] for iid in children]
+        self._save_nav_order()
+
+    def _reorder_loc(self, drag_iid, target_iid, y):
+        """Move drag_iid before or after target_iid within their shared parent area."""
+        parent = self.nav.parent(drag_iid)
+        if not parent:
+            return
+        children = [c for c in self.nav.get_children(parent) if not c.startswith("O|")]
+        if drag_iid not in children:
+            return
+        if target_iid not in children:
+            # Dropped on the area header — move to end of locations
+            children.remove(drag_iid)
+            children.append(drag_iid)
+        else:
+            row_bbox = self.nav.bbox(target_iid)
+            insert_after = row_bbox and y > row_bbox[1] + row_bbox[3] // 2
+            children.remove(drag_iid)
+            idx = children.index(target_iid)
+            children.insert(idx + (1 if insert_after else 0), drag_iid)
+        # Reorder in tree (keep Other group at the end)
+        others = [c for c in self.nav.get_children(parent) if c.startswith("O|")]
+        for pos, iid in enumerate(children + others):
+            self.nav.move(iid, parent, pos)
+        area_title = parent.split("|", 1)[1]
+        # loc iid format: "L|area|loc"
+        self.loc_order_custom[area_title] = [iid.split("|", 2)[2] for iid in children
+                                             if iid.startswith("L|")]
+        self._save_nav_order()
 
     def toggle_extra(self):
         save_settings(extra_info=self.extra.get())
@@ -1223,7 +1336,14 @@ class App:
 
         def changed(rs):
             return ("changed",) if any(self.is_changed(r) for r in rs) else ()
-        for title, files, locked in AREAS:
+        # Apply custom area order: listed areas first, then any new ones in AREAS order
+        if self.area_order:
+            by_title = {a[0]: a for a in AREAS}
+            areas = [by_title[t] for t in self.area_order if t in by_title]
+            areas += [a for a in AREAS if a[0] not in {x[0] for x in areas}]
+        else:
+            areas = list(AREAS)
+        for title, files, locked in areas:
             if tag == b"CARD":
                 res = list(self.area_cards.get(title, {}).values())
             else:
@@ -1235,7 +1355,14 @@ class App:
             groups = {}
             for r in res:
                 groups.setdefault(r.loc, []).append(r)
-            for loc in sorted((k for k in groups if not k.startswith(OTHER)), key=lambda k: self.loc_key(title, k)):
+            named = [k for k in groups if not k.startswith(OTHER)]
+            custom = self.loc_order_custom.get(title, [])
+            if custom:
+                ordered = [l for l in custom if l in groups]
+                ordered += sorted([l for l in named if l not in custom], key=lambda k: self.loc_key(title, k))
+            else:
+                ordered = sorted(named, key=lambda k: self.loc_key(title, k))
+            for loc in ordered:
                 self.nav.insert(aid, "end", iid=self.nav_iid(title, loc), text=loc,
                                 values=(len(groups[loc]),), tags=changed(groups[loc]))
             others = sorted(k for k in groups if k.startswith(OTHER))
