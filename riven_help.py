@@ -30,7 +30,8 @@ Riven Mod Tool lets you browse every image and movie in Riven (25th Anniversary,
 ## Preferences
 - **Dark mode** switches the whole tool, this help included, to a dark theme.
 - **Show extra info (file paths)** is **off by default**. Off, the tool says just "Saved", "Staged", "Exported 12 file(s)" and so on, hides folder names in the status bar, info line and error messages, and doesn't open Explorer after an export. On, it shows the full path of what was saved, loaded or staged. Off is the one to use when streaming.
-Both are remembered for next time.
+- **Order locations by playthrough progression / alphabetically** chooses how the locations in the left panel, and the Location column when you sort it, are ordered. Progression (the default) follows a typical route through each island; alphabetical is plain A to Z.
+All of these are remembered for next time.
 
 > Windows draws the menu bar and the file open/save windows itself. They follow your Windows dark/light setting, and the file windows will show folder names whatever this setting is.
 """),
@@ -38,7 +39,7 @@ Both are remembered for next time.
 ("Finding images and movies", """
 # Finding images and movies
 ## Islands and locations (left panel)
-Every island (and the menus, inventory and credits) is listed with its locations, grouped from codes in Riven's own file names: Gate Room, Temple, Village, Fire Marble Dome and so on. Items whose code isn't recognised take the location of the card their file name points at (for example the Gehn's Imager chair movies), and only a handful of leftovers remain under **Other (unlabelled codes)**, by their raw code. The grouping is inferred from names and may not match what you'd call a place. Click an island to see all of it, or a location to narrow it down. The numbers are item counts.
+Every island (and the menus, inventory and credits) is listed with its locations, grouped from codes in Riven's own file names: Gate Room, Temple, Village, Fire Marble Dome and so on. Items whose code isn't recognised take the location of the card their file name points at (for example the Gehn's Imager chair movies), and only a handful of leftovers remain under **Other (unlabelled codes)**, by their raw code. The grouping is inferred from names and may not match what you'd call a place. Within an island the locations are listed in a **typical playthrough order**: where you arrive or the hub first, then outward, with transit, domes and endings later and shared pieces last (sorting the Location column uses the same order; **Preferences** can switch to alphabetical instead). It's a best-guess route, not a strict one. Click an island to see all of it, or a location to narrow it down. The numbers are item counts.
 
 ## Images / Movies / Cards (top bar)
 - **Images** and **Movies** list resources by id, with the cards (screens) that use them.

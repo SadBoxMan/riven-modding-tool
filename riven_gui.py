@@ -26,7 +26,7 @@ import threading
 import time
 import traceback
 import tkinter as tk
-from tkinter import ttk, filedialog, messagebox
+from tkinter import ttk, filedialog, messagebox, simpledialog
 
 from PIL import Image, ImageChops, ImageDraw, ImageFont, ImageTk
 
@@ -873,6 +873,10 @@ class App:
         self.area_order: list = prefs_nav.get("area_order", [])      # custom area order (titles)
         self.loc_order_custom: dict = prefs_nav.get("loc_order_custom", {})  # area title → [loc names]
         self.nav_drag_iid = None    # iid being dragged in the nav tree
+        self.tree_drag_iid = None   # iid being dragged in the main list
+        self._tree_drag_start_y = 0
+        self.section_labels: dict = prefs_nav.get("section_labels", {})   # "area|loc" → display label
+        self.loc_override: dict = prefs_nav.get("loc_override", {})
         self.blink_on, self.blink_job, self.time_job = False, None, None
         self.duration = 0.0
         self.cache_lock = threading.Lock()
@@ -997,17 +1001,27 @@ class App:
         pw.add(nav, weight=1)
 
         left = ttk.Frame(pw)
-        cols = ("id", "loc", "name", "cards", "status")
+        cols = ("id", "loc", "name", "notes", "cards", "status")
         self.tree = ttk.Treeview(left, columns=cols, show="headings", selectmode="browse")
         self.sort_col, self.sort_dir = None, None  # click a header: default -> ascending -> descending -> default
-        for c, w, t in zip(cols, (55, 140, 150, 120, 130), ("ID", "Location", "Name", "Used on cards", "Status")):
+        for c, w, t in zip(cols, (55, 130, 130, 150, 90, 130),
+                           ("ID", "Location", "Name", "Notes", "Used on cards", "Status")):
             self.tree.heading(c, text=t, command=lambda c=c: self.on_sort(c))
-            self.tree.column(c, width=w, stretch=(c in ("loc", "name", "cards")), anchor="e" if c == "id" else "w")
+            self.tree.column(c, width=w, stretch=(c in ("loc", "name", "notes", "cards")),
+                             anchor="e" if c == "id" else "w")
         sb = ttk.Scrollbar(left, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=sb.set)
         self.tree.pack(side="left", fill="both", expand=True)
         sb.pack(side="left", fill="y")
         self.tree.bind("<<TreeviewSelect>>", self.on_select)
+        self.tree.tag_configure("section", background="#2a4a60", foreground="#b8d4e4",
+                                font=("Segoe UI", 9, "bold"))
+        self.tree.tag_configure("drag_target", background="#4080d0")
+        self.tree.bind("<ButtonPress-1>", self._tree_drag_start, add=True)
+        self.tree.bind("<B1-Motion>", self._tree_drag_motion, add=True)
+        self.tree.bind("<ButtonRelease-1>", self._tree_drag_end, add=True)
+        self.tree.bind("<Double-1>", self._tree_double_click, add=True)
+        self.tree.bind("<Button-3>", self._tree_right_click, add=True)
         pw.add(left, weight=2)
 
         right = ttk.Frame(pw)
@@ -1095,7 +1109,7 @@ class App:
         self.info = ttk.Label(right, anchor="w", justify="left", padding=(0, 4), wraplength=1000)
         self.info.pack(fill="x")
         nr = self.note_row = ttk.Frame(right)
-        ttk.Label(nr, text="Custom name:").pack(side="left")
+        ttk.Label(nr, text="Notes:").pack(side="left")
         self.note_var = tk.StringVar()
         self.note_entry = ttk.Entry(nr, textvariable=self.note_var)
         self.note_entry.pack(side="left", fill="x", expand=True, padx=(4, 0))
@@ -1130,6 +1144,9 @@ class App:
         sfg = "#c8d8e8" if dark else "#1a1a1a"
         self.script_text.configure(bg=sbg, fg=sfg, insertbackground=sfg, selectbackground="#3a5a8a")
         self.nav.tag_configure("drag_target", background="#1a4a8a" if dark else "#4080d0")
+        self.tree.tag_configure("section", background="#1e3a50" if dark else "#c4d8e4",
+                                foreground="#90c0d8" if dark else "#1a2a38")
+        self.tree.tag_configure("drag_target", background="#1a4a8a" if dark else "#4080d0")
 
     def loc_key(self, area, loc):
         """Sort key for a location: playthrough order, or plain alphabetical (Preferences)."""
@@ -1242,6 +1259,124 @@ class App:
                                              if iid.startswith("L|")]
         self._save_nav_order()
 
+    # ---------------------------------------------------------------- main-list drag (move resource to section)
+    def _tree_drag_start(self, e):
+        iid = self.tree.identify_row(e.y)
+        if iid and not iid.startswith("sec|") and iid in self.rows:
+            self.tree_drag_iid = iid
+            self._tree_drag_start_y = e.y
+
+    def _tree_drag_motion(self, e):
+        if not self.tree_drag_iid:
+            return
+        if abs(e.y - self._tree_drag_start_y) < 5:
+            return
+        target = self.tree.identify_row(e.y)
+        for tagged in list(self.tree.tag_has("drag_target")):
+            tags = [t for t in self.tree.item(tagged, "tags") if t != "drag_target"]
+            self.tree.item(tagged, tags=tags)
+        if target and target.startswith("sec|"):
+            self.tree.item(target, tags=list(self.tree.item(target, "tags")) + ["drag_target"])
+            self.tree.configure(cursor="sb_v_double_arrow")
+        else:
+            self.tree.configure(cursor="")
+
+    def _tree_drag_end(self, e):
+        for tagged in list(self.tree.tag_has("drag_target")):
+            tags = [t for t in self.tree.item(tagged, "tags") if t != "drag_target"]
+            self.tree.item(tagged, tags=tags)
+        self.tree.configure(cursor="")
+        drag_iid = self.tree_drag_iid
+        self.tree_drag_iid = None
+        if not drag_iid:
+            return
+        target = self.tree.identify_row(e.y)
+        if not target or not target.startswith("sec|"):
+            return
+        r = self.rows.get(drag_iid)
+        if not r or isinstance(r, str):
+            return
+        new_loc = target[4:]  # strip "sec|" prefix
+        if new_loc == r.loc:
+            return
+        self._move_resource_to_loc(r, new_loc)
+
+    def _move_resource_to_loc(self, r, new_loc):
+        r.loc = new_loc
+        override_key = f"{r.archive}|{r.tag.decode()}|{r.rid}"
+        self.loc_override[override_key] = new_loc
+        save_settings(loc_override=self.loc_override)
+        self.build_nav()
+        self.refresh_list(keep_sel=r.key() if self.sel else None)
+
+    def _tree_double_click(self, e):
+        """Double-click the Notes column cell to edit inline."""
+        iid = self.tree.identify_row(e.y)
+        col = self.tree.identify_column(e.x)
+        if not iid or iid.startswith("sec|") or col != "#4":  # "#4" is the "notes" column
+            return
+        r = self.rows.get(iid)
+        if not r or isinstance(r, str):
+            return
+        # Position a temporary Entry widget over the cell
+        bbox = self.tree.bbox(iid, column="notes")
+        if not bbox:
+            return
+        x, y, w, h = bbox
+        var = tk.StringVar(value=r.note)
+        entry = ttk.Entry(self.tree, textvariable=var)
+        entry.place(x=x, y=y, width=w, height=h)
+        entry.focus_set()
+        entry.select_range(0, "end")
+
+        def commit(event=None):
+            text = var.get().strip()
+            entry.destroy()
+            if text == r.note:
+                return
+            r.note = text
+            k = note_key(r)
+            if text:
+                self.custom_names[k] = text
+            else:
+                self.custom_names.pop(k, None)
+            save_custom_names(self.custom_names)
+            self.update_row(r)
+            self.update_info()
+
+        def cancel(event=None):
+            entry.destroy()
+
+        entry.bind("<Return>", commit)
+        entry.bind("<Escape>", cancel)
+        entry.bind("<FocusOut>", commit)
+
+    def _tree_right_click(self, e):
+        """Right-click a section header to rename it."""
+        iid = self.tree.identify_row(e.y)
+        if not iid or not iid.startswith("sec|"):
+            return
+        loc = iid[4:]
+        label = self.section_labels.get(f"{self.cur_area}|{loc}", loc)
+        menu = tk.Menu(self.root, tearoff=0)
+        menu.add_command(label=f"Rename section '{label}'...",
+                         command=lambda: self._rename_section(loc, label))
+        menu.tk_popup(e.x_root, e.y_root)
+
+    def _rename_section(self, loc, current_label):
+        new_label = simpledialog.askstring("Rename section", f"New name for '{current_label}':",
+                                           initialvalue=current_label, parent=self.root)
+        if new_label is None:
+            return
+        new_label = new_label.strip()
+        key = f"{self.cur_area}|{loc}"
+        if new_label and new_label != loc:
+            self.section_labels[key] = new_label
+        else:
+            self.section_labels.pop(key, None)
+        save_settings(section_labels=self.section_labels)
+        self.refresh_list(keep_sel=self.sel.key() if self.sel else None)
+
     def toggle_extra(self):
         save_settings(extra_info=self.extra.get())
         self.set_status(self.status.cget("text"))  # re-scrub what's showing
@@ -1337,6 +1472,9 @@ class App:
                 self.archives.update(arcs)
                 for r in resources:
                     r.note = self.custom_names.get(note_key(r), "")
+                    override_key = f"{r.archive}|{r.tag.decode()}|{r.rid}"
+                    if override_key in self.loc_override:
+                        r.loc = self.loc_override[override_key]
                 self.area_res[title] = resources
                 self.area_cards[title] = cards
                 self.res_by.update({(title, r.tag, r.rid): r for r in resources})
@@ -1483,7 +1621,7 @@ class App:
         return ", ".join(parts)
 
     # ---------------------------------------------------------------- column sorting
-    SORT_COLS = ("id", "loc", "name", "cards", "status")
+    SORT_COLS = ("id", "loc", "name", "notes", "cards", "status")
 
     def on_sort(self, col):
         """Header click: default -> ascending -> descending -> default. Another column starts over."""
@@ -1498,7 +1636,7 @@ class App:
     def update_headings(self):
         cards_mode = self.kind.get() == "CARD"
         titles = {"id": "ID", "loc": "Location", "name": "Card name" if cards_mode else "Name",
-                  "cards": "Contents" if cards_mode else "Used on cards", "status": "Status"}
+                  "notes": "Notes", "cards": "Contents" if cards_mode else "Used on cards", "status": "Status"}
         for c, t in titles.items():
             arrow = (" ▼" if self.sort_dir == "desc" else " ▲") if c == self.sort_col else ""
             self.tree.heading(c, text=t + arrow)
@@ -1509,7 +1647,7 @@ class App:
         return tuple((0, int(t), "") if t.isdigit() else (1, 0, t.lower())
                      for t in re.findall(r"\d+|\D+", str(value)))
 
-    def insert_rows(self, rows):
+    def insert_rows(self, rows, with_sections=False):
         """rows: [(iid, obj, tags, values)] in default order; sort by the chosen column, then fill the tree."""
         if self.sort_col:
             i = self.SORT_COLS.index(self.sort_col)
@@ -1521,9 +1659,27 @@ class App:
                 key = lambda r: self.natural_key(r[3][i])  # noqa: E731
             filled.sort(key=key, reverse=self.sort_dir == "desc")
             rows = filled + empty
-        for iid, obj, tags, values in rows:
-            self.rows[iid] = obj
-            self.tree.insert("", "end", iid=iid, tags=tags, values=values)
+            with_sections = False  # sorting breaks location grouping
+        if with_sections:
+            groups, order = {}, []
+            for item in rows:
+                loc = item[3][1]  # "loc" is index 1 in the values tuple
+                if loc not in groups:
+                    groups[loc] = []
+                    order.append(loc)
+                groups[loc].append(item)
+            for loc in order:
+                label = self.section_labels.get(f"{self.cur_area}|{loc}", loc)
+                sec_iid = f"sec|{loc}"
+                self.tree.insert("", "end", iid=sec_iid, tags=("section",),
+                                 values=("", "", label, "", "", ""))
+                for iid, obj, tags, values in groups[loc]:
+                    self.rows[iid] = obj
+                    self.tree.insert("", "end", iid=iid, tags=tags, values=values)
+        else:
+            for iid, obj, tags, values in rows:
+                self.rows[iid] = obj
+                self.tree.insert("", "end", iid=iid, tags=tags, values=values)
 
     def refresh_cards(self):
         """Cards mode: one row per card of the current area/location."""
@@ -1546,8 +1702,8 @@ class App:
             if q and q not in (f"{c.cid} {c.name} " + " ".join(str(i.rid) for i in items)).lower():
                 continue
             rows.append((f"card|{c.cid}", c, self.row_tags(c),
-                         (c.cid, c.loc, c.name, self.card_contents(c), self.card_status(c))))
-        self.insert_rows(rows)
+                         (c.cid, c.loc, c.name, "", self.card_contents(c), self.card_status(c))))
+        self.insert_rows(rows, with_sections=(self.cur_loc is None and self.sort_col is None))
         self.apply_btn.config(text=f"Apply staged ({len(self.staged)})")
         if keep and f"card|{keep.cid}" in self.rows and keep.area == self.cur_area:
             self.tree.selection_set(f"card|{keep.cid}")  # fires on_select
@@ -1587,8 +1743,8 @@ class App:
             if q and q not in f"{r.rid} {r.note} {r.name} {cards}".lower():
                 continue
             rows.append((f"{r.archive}|{r.rid}", r, self.row_tags(r),
-                         (r.rid, r.loc, r.note or r.name, cards, self.status_of(r))))
-        self.insert_rows(rows)
+                         (r.rid, r.loc, r.name, r.note, cards, self.status_of(r))))
+        self.insert_rows(rows, with_sections=(self.cur_loc is None and self.sort_col is None))
         n = len(self.staged)
         self.apply_btn.config(text=f"Apply staged ({n})")
         if keep:
@@ -1605,11 +1761,11 @@ class App:
     def update_row(self, r):
         iid = f"{r.archive}|{r.rid}"
         if self.tree.exists(iid):
-            self.tree.item(iid, values=(r.rid, r.loc, r.note or r.name, ", ".join(r.cards), self.status_of(r)),
+            self.tree.item(iid, values=(r.rid, r.loc, r.name, r.note, ", ".join(r.cards), self.status_of(r)),
                            tags=self.row_tags(r))
         c = self.cur_card
         if c and self.tree.exists(f"card|{c.cid}"):
-            self.tree.item(f"card|{c.cid}", values=(c.cid, c.loc, c.name, self.card_contents(c), self.card_status(c)),
+            self.tree.item(f"card|{c.cid}", values=(c.cid, c.loc, c.name, "", self.card_contents(c), self.card_status(c)),
                            tags=self.row_tags(c))
         self.apply_btn.config(text=f"Apply staged ({len(self.staged)})")
 
@@ -1669,7 +1825,11 @@ class App:
         sel = self.tree.selection()
         if not sel:
             return
-        row = self.rows[sel[0]]
+        if sel[0].startswith("sec|"):
+            return
+        row = self.rows.get(sel[0])
+        if row is None:
+            return
         if isinstance(row, Card):
             self.cur_card = row
             self.fill_item_choices(row)
