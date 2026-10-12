@@ -31,6 +31,7 @@ from tkinter import ttk, filedialog, messagebox, simpledialog
 from PIL import Image, ImageChops, ImageDraw, ImageFont, ImageTk
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+DATA_PATH = getattr(sys, "_MEIPASS", HERE)  # bundled-data root when frozen by PyInstaller
 sys.path.insert(0, HERE)
 import riven_img as R  # noqa: E402
 import riven_layers as LY  # noqa: E402
@@ -293,7 +294,7 @@ def _create_riven_cursor():
     if os.path.exists(CURSOR_PATH):
         return CURSOR_PATH
     # 1. User-supplied cursors folder next to this script
-    local_cur = os.path.join(HERE, "cursors", "NORMAL.cur")
+    local_cur = os.path.join(DATA_PATH, "cursors", "NORMAL.cur")
     if os.path.exists(local_cur):
         try:
             os.makedirs(os.path.dirname(CURSOR_PATH), exist_ok=True)
@@ -304,7 +305,7 @@ def _create_riven_cursor():
             pass
     # 2. Extract from macgui.dat
     import zipfile
-    macgui = os.path.join(HERE, "macgui.dat")
+    macgui = os.path.join(DATA_PATH, "macgui.dat")
     try:
         if os.path.exists(macgui) and zipfile.is_zipfile(macgui):
             with zipfile.ZipFile(macgui) as z:
@@ -2974,7 +2975,25 @@ class App:
 
 
 def main():
-    game_dir = os.path.abspath(sys.argv[1]) if len(sys.argv) > 1 else HERE
+    if len(sys.argv) > 1:
+        game_dir = os.path.abspath(sys.argv[1])
+    elif getattr(sys, "frozen", False):
+        exe_dir = os.path.dirname(sys.executable)
+        if os.path.exists(os.path.join(exe_dir, "a_data.mhk")):
+            game_dir = exe_dir
+        else:
+            _r = tk.Tk()
+            _r.withdraw()
+            messagebox.showinfo("Riven Mod Tool",
+                                "Riven game files not found next to RivenModTool.exe.\n"
+                                "Please choose your Riven game folder "
+                                "(the one that contains a_data.mhk).")
+            game_dir = filedialog.askdirectory(title="Riven game folder — contains a_data.mhk")
+            _r.destroy()
+            if not game_dir:
+                return
+    else:
+        game_dir = HERE
     if os.name == "nt":
         try:
             ctypes.windll.shcore.SetProcessDpiAwareness(1)
@@ -2987,11 +3006,15 @@ def main():
             pass
     root = tk.Tk()
     for ico in ("realmyst.ico", "Riven.ico"):
-        try:
-            root.iconbitmap(default=os.path.join(HERE, ico))
-            break
-        except tk.TclError:
-            pass
+        for search_dir in (game_dir, DATA_PATH):
+            try:
+                root.iconbitmap(default=os.path.join(search_dir, ico))
+                break
+            except tk.TclError:
+                pass
+        else:
+            continue
+        break
     App(root, game_dir)
     root.mainloop()
 
