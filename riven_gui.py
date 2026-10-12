@@ -283,14 +283,26 @@ def _save_cur_file(img, path, hotspot=(0, 0)):
 
 
 def _create_riven_cursor():
-    """Extract the classic arrow cursor from macgui.dat (bundled with ScummVM).
+    """Return a path to the Riven cursor .cur file, extracting/copying it once if needed.
 
-    macgui.dat is a ZIP containing Windows .cur files used by ScummVM's Mac GUI
-    layer and QTVR support; CURSOR128 is the standard black arrow pointer.
-    Falls back to a generated cursor if the file can't be found or extracted.
+    Search order:
+      1. cursors/NORMAL.cur alongside this script (user-supplied set)
+      2. CURSOR128 extracted from macgui.dat (bundled with ScummVM)
+      3. Generated black arrow (PIL fallback)
     """
     if os.path.exists(CURSOR_PATH):
         return CURSOR_PATH
+    # 1. User-supplied cursors folder next to this script
+    local_cur = os.path.join(HERE, "cursors", "NORMAL.cur")
+    if os.path.exists(local_cur):
+        try:
+            os.makedirs(os.path.dirname(CURSOR_PATH), exist_ok=True)
+            import shutil as _sh
+            _sh.copy2(local_cur, CURSOR_PATH)
+            return CURSOR_PATH
+        except Exception:
+            pass
+    # 2. Extract from macgui.dat
     import zipfile
     macgui = os.path.join(HERE, "macgui.dat")
     try:
@@ -303,11 +315,10 @@ def _create_riven_cursor():
             return CURSOR_PATH
     except Exception:
         pass
-    # Fallback: generate a minimal black arrow cursor with PIL
+    # 3. Generate a minimal black arrow cursor
     try:
         img = Image.new("RGBA", (32, 32), (0, 0, 0, 0))
         d = ImageDraw.Draw(img)
-        # Black-filled arrow with white outline, tip at (0,0)
         arrow = [(0, 0), (0, 20), (5, 15), (9, 24), (11, 23), (7, 14), (14, 14)]
         d.polygon(arrow, fill=(0, 0, 0, 255))
         d.polygon(arrow, outline=(255, 255, 255, 255))
