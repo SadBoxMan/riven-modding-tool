@@ -252,6 +252,55 @@ def note_key(r):
     return f"{r.archive}|{r.tag.decode()}|{r.rid}"
 
 
+CURSOR_PATH = os.path.join(os.environ.get("APPDATA", HERE), "RivenModTool", "riven_cursor.cur")
+
+
+def _save_cur_file(img, path, hotspot=(0, 0)):
+    """Write a PIL RGBA image as a Windows .cur file (32-bit BGRA DIB)."""
+    w, h = img.size
+    raw = img.tobytes("raw", "RGBA")
+    pixels = [tuple(raw[i:i+4]) for i in range(0, len(raw), 4)]
+    xor = bytearray()
+    for y in range(h - 1, -1, -1):
+        for x in range(w):
+            r, g, b, a = pixels[y * w + x]
+            xor += bytes([b, g, r, a])
+    row_bytes = (w + 31) // 32 * 4
+    and_mask = bytearray(row_bytes * h)
+    for y in range(h):
+        inv_y = h - 1 - y
+        for x in range(w):
+            if pixels[y * w + x][3] < 128:
+                and_mask[inv_y * row_bytes + x // 8] |= 1 << (7 - x % 8)
+    bih = struct.pack("<IIiHHIIIIII", 40, w, h * 2, 1, 32, 0, len(xor) + len(and_mask), 0, 0, 0, 0)
+    img_data = bih + bytes(xor) + bytes(and_mask)
+    header = struct.pack("<HHH", 0, 2, 1)
+    dir_entry = struct.pack("<BBBBHHIi", min(w, 255), min(h, 255), 0, 0,
+                            hotspot[0], hotspot[1], len(img_data), 22)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "wb") as f:
+        f.write(header + dir_entry + img_data)
+
+
+def _create_riven_cursor():
+    """Build a Riven-style arrow cursor .cur file and return its path."""
+    if os.path.exists(CURSOR_PATH):
+        return CURSOR_PATH
+    try:
+        img = Image.new("RGBA", (32, 32), (0, 0, 0, 0))
+        d = ImageDraw.Draw(img)
+        B, W = (0, 0, 0, 255), (255, 255, 255, 255)
+        # Classic left/up-pointing arrow:  tip at (0,0), hotspot (0,0)
+        # White fill polygon, then black outline
+        arrow = [(0, 0), (0, 20), (5, 15), (9, 24), (11, 23), (7, 14), (14, 14)]
+        d.polygon(arrow, fill=W)
+        d.polygon(arrow, outline=B)
+        _save_cur_file(img, CURSOR_PATH, hotspot=(0, 0))
+    except Exception:
+        return None
+    return CURSOR_PATH
+
+
 # list colours that stay readable on each background
 TAG_COLORS = {
     False: {"patched": "#1060c0", "staged": "#c06000", "label": "#9030a0", "locked": "#a00000",
@@ -811,6 +860,12 @@ class App:
         root.title("Riven Mod Tool")
         root.geometry("1500x860")
         root.minsize(1000, 600)
+        cur_path = _create_riven_cursor()
+        if cur_path:
+            try:
+                root.configure(cursor="@" + cur_path.replace("\\", "/"))
+            except Exception:
+                pass
 
         menu = tk.Menu(root)
         fm = tk.Menu(menu, tearoff=0)
