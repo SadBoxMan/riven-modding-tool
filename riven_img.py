@@ -45,6 +45,7 @@ except ImportError:
 
 TBMP = b"tBMP"
 TMOV = b"tMOV"
+TWAV = b"tWAV"
 IMAGE_EXTS = {".png", ".bmp", ".jpg", ".jpeg", ".tif", ".tiff", ".gif"}
 # keep ffmpeg from flashing console windows when called from the GUI
 NOWIN = {"creationflags": 0x08000000} if os.name == "nt" else {}
@@ -426,6 +427,10 @@ def encode_tbmp_24(img):
 # ---------------------------------------------------------------------------
 
 def _tool(name):
+    # When frozen by PyInstaller, check the bundled binary first
+    bundled = os.path.join(getattr(sys, "_MEIPASS", ""), name + ".exe")
+    if os.path.exists(bundled):
+        return bundled
     p = shutil.which(name)
     if not p:
         links = os.path.join(os.environ.get("LOCALAPPDATA", ""), "Microsoft", "WinGet", "Links", name + ".exe")

@@ -6,5 +6,11 @@
 !riven_pack.py
 !riven_help.py
 !riven_layers.py
+!riven_snd.py
+!RivenModTool.spec
+!RivenModTool-noffmpeg.spec
+!HANDOFF.md
+!dev/
+!dev/**
 !CLAUDE.md
 !realmyst.ico

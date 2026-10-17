@@ -10,10 +10,14 @@
 
 block_cipher = None
 
+_FFMPEG = r'C:\Users\lukea\AppData\Local\Microsoft\WinGet\Packages\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe\ffmpeg-9.0.2-full_build\bin\ffmpeg.exe'
+
 a = Analysis(
     ['riven_gui.py'],
     pathex=[],
-    binaries=[],
+    binaries=[
+        (_FFMPEG, '.'),   # bundled as ffmpeg.exe at the root of the package
+    ],
     datas=[
         # Cursor set — bundled so the custom cursor works without the game folder
         ('cursors/*.cur', 'cursors'),
@@ -24,6 +28,7 @@ a = Analysis(
     hiddenimports=[
         'PIL._tkinter_finder',
         'riven_img',
+        'riven_snd',
         'riven_layers',
         'riven_help',
     ],

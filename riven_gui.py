@@ -27,6 +27,11 @@ import time
 import traceback
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, simpledialog
+try:
+    import winsound as _winsound
+    _HAS_WINSOUND = True
+except ImportError:
+    _HAS_WINSOUND = False
 
 from PIL import Image, ImageChops, ImageDraw, ImageFont, ImageTk
 
@@ -34,6 +39,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 DATA_PATH = getattr(sys, "_MEIPASS", HERE)  # bundled-data root when frozen by PyInstaller
 sys.path.insert(0, HERE)
 import riven_img as R  # noqa: E402
+import riven_snd as SND  # noqa: E402
 import riven_layers as LY  # noqa: E402
 import riven_help  # noqa: E402
 from riven_help import TOPIC_NAMES, set_help_dark, show_help  # noqa: E402
@@ -192,7 +198,21 @@ def _clean_old_caches():
                     shutil.rmtree(p, ignore_errors=True)
             except OSError:
                 pass
-KIND_NAMES = {R.TBMP: "image", R.TMOV: "movie"}
+KIND_NAMES = {R.TBMP: "image", R.TMOV: "movie", R.TWAV: "sound"}
+
+# Sound archives per area (data = short ADPCM effects; sounds = long MP2 ambient tracks).
+# Entries must match AREAS titles exactly so nav tree grouping works.
+SOUND_AREAS = [
+    ("Temple Island",                 ["t_data2.mhk", "t_data1.mhk", "t_sounds.mhk"]),
+    ("Jungle Island",                 ["j_data2.mhk", "j_data1.mhk", "j_sounds.mhk"]),
+    ("Boiler Island",                 ["b_data.mhk", "b_sounds.mhk"]),
+    ("Garden Island (Survey Island)", ["g_data.mhk", "g_sounds.mhk"]),
+    ("Prison Island",                 ["p_data.mhk", "p_sounds.mhk"]),
+    ("Gehn's Office (233rd Age)",     ["o_data.mhk", "o_sounds.mhk"]),
+    ("Rebel Age (Tay)",               ["r_data.mhk", "r_sounds.mhk"]),
+    ("Inventory, Marbles & Credits",  ["extras.mhk"]),
+    ("Menus & Journals",              ["a_data.mhk", "a_sounds.mhk"]),
+]
 
 
 # ---------------------------------------------------------------- path hiding (for streaming)
@@ -383,7 +403,7 @@ def apply_ttk_theme(root, dark, light_theme):
         s.map(w, background=[("active", c["bg"])], indicatorbackground=[("selected", c["sel"]), ("pressed", c["sel"])],
               indicatorforeground=[("selected", "#ffffff")])
     s.configure("Treeview", background=c["field"], fieldbackground=c["field"], foreground=c["fg"],
-                bordercolor=c["border"], lightcolor=c["field"], darkcolor=c["field"])
+                bordercolor=c["border"], lightcolor=c["field"], darkcolor=c["field"], rowheight=24)
     s.map("Treeview", background=[("selected", c["sel"])], foreground=[("selected", "#ffffff")])
     s.configure("Treeview.Heading", background=c["panel"], foreground=c["fg"], relief="flat",
                 bordercolor=c["border"], lightcolor=c["panel"], darkcolor=c["panel"])
@@ -683,6 +703,32 @@ def load_area(game_dir, files, title=""):
     return archives, resources, cards
 
 
+def load_area_sounds(game_dir, files, title):
+    """Load tWAV resources from sound archives. Returns (archives_dict, resources_list)."""
+    archives, resources = {}, []
+    for fn in files:
+        path = os.path.join(game_dir, fn)
+        if not os.path.exists(path):
+            continue
+        orig = R.Archive(R.find_original(path))
+        cur = R.Archive(path) if os.path.exists(path + ".orig") else orig
+        first_new = len(orig.files) + 2 if cur.abs_offset != orig.abs_offset else None
+        archives[fn] = (orig, cur)
+        for rid in orig.ids(R.TWAV):
+            r = Res()
+            r.archive, r.tag, r.rid = fn, R.TWAV, rid
+            r.name = orig.names.get((R.TWAV, rid), "")
+            r.note = ""
+            r.patched = bool(first_new and cur.types.get(R.TWAV, {}).get(rid, 0) >= first_new)
+            r.label = False
+            r.cards = []
+            r.card_ids = []
+            r.area = title
+            r.loc = "Ambient tracks" if fn.endswith("_sounds.mhk") else "Sound effects"
+            resources.append(r)
+    return archives, resources
+
+
 def is_named(loc):
     return loc != SHARED and not loc.startswith(OTHER)
 
@@ -853,6 +899,10 @@ class App:
         self.q = queue.Queue()
         self.pool = cf.ThreadPoolExecutor(max_workers=3)
         self.archives, self.area_res, self.rows = {}, {}, {}   # area_res: area title -> [Res]
+        self.area_snd = {}            # area title -> [Res] for tWAV sounds
+        self._snd_info_cache = {}     # r.key() -> info_str
+        self._snd_playing_key = None  # key() of the resource currently playing
+        self._snd_stop_job = None     # root.after handle for auto-stop
         self.area_cards, self.res_by = {}, {}   # area title -> {card id: Card};  (area, tag, rid) -> Res
         self.cur_card = None                    # the Card picked in Cards mode
         self.place_cids, self.place_bgs, self.place_items = [], [], []   # combobox value -> id lists
@@ -957,6 +1007,8 @@ class App:
         ttk.Radiobutton(top, text="Movies", variable=self.kind, value="tMOV", command=self.on_kind).pack(
             side="left", padx=(4, 0))
         ttk.Radiobutton(top, text="Cards", variable=self.kind, value="CARD", command=self.on_kind).pack(
+            side="left", padx=(4, 0))
+        ttk.Radiobutton(top, text="Sounds", variable=self.kind, value="tWAV", command=self.on_kind).pack(
             side="left", padx=(4, 14))
         ttk.Label(top, text="Search").pack(side="left")
         self.search = tk.StringVar()
@@ -1027,13 +1079,13 @@ class App:
 
         right = ttk.Frame(pw)
         pw.add(right, weight=4)
-        ctl = ttk.Frame(right)
+        ctl = self.view_ctl = ttk.Frame(right)
         ctl.pack(fill="x", pady=(0, 4))
         ttk.Label(ctl, text="View").pack(side="left")
         self.mode = tk.StringVar(value="side")
         for txt, val in (("Side by side", "side"), ("Swipe", "swipe"), ("Blink", "blink"), ("Difference", "diff")):
             ttk.Radiobutton(ctl, text=txt, variable=self.mode, value=val, command=self.redraw).pack(side="left", padx=3)
-        ctl = ttk.Frame(right)  # second row, so nothing gets cut off on narrow windows
+        ctl = self.cmp_ctl = ttk.Frame(right)  # second row, so nothing gets cut off on narrow windows
         ctl.pack(fill="x", pady=(0, 4))
         ttk.Label(ctl, text="Compare new against").pack(side="left")
         self.ref = tk.StringVar(value="orig")
@@ -1106,6 +1158,18 @@ class App:
             b = ttk.Button(self.movie_bar, text=txt, command=lambda w=which: self.play(w))
             b.pack(side="left", padx=2)
             self.play_btns[which] = b
+
+        self.snd_bar = ttk.Frame(right)
+        sb2 = ttk.Frame(self.snd_bar)
+        sb2.pack(fill="x", pady=(0, 2))
+        self.b_snd_play = ttk.Button(sb2, text="▶ Play", width=10, command=self.snd_play)
+        self.b_snd_play.pack(side="left", padx=(0, 4))
+        self.b_snd_stop = ttk.Button(sb2, text="■ Stop", width=10, command=self.snd_stop)
+        self.b_snd_stop.pack(side="left")
+        self.snd_play_lbl = ttk.Label(sb2, anchor="w")
+        self.snd_play_lbl.pack(side="left", padx=(8, 0))
+        self.snd_info_lbl = ttk.Label(self.snd_bar, anchor="w", justify="left", padding=(0, 2))
+        self.snd_info_lbl.pack(fill="x")
 
         self.info = ttk.Label(right, anchor="w", justify="left", padding=(0, 4), wraplength=1000)
         self.info.pack(fill="x")
@@ -1456,6 +1520,8 @@ class App:
 
     @property
     def resources(self):
+        if self.kind.get() == "tWAV":
+            return self.area_snd.get(self.cur_area, [])
         return self.area_res.get(self.cur_area, [])
 
     # ---------------------------------------------------------------- areas + navigation
@@ -1465,11 +1531,15 @@ class App:
         game_dir = self.game_dir
 
         def job():
-            return {title: load_area(game_dir, files, title) for title, files, _ in AREAS}
+            img = {title: load_area(game_dir, files, title) for title, files, _ in AREAS}
+            snd = {title: load_area_sounds(game_dir, files, title) for title, files in SOUND_AREAS}
+            return img, snd
 
         def done(res):
+            img_res, snd_res = res
             self.archives, self.area_res, self.area_cards, self.res_by = {}, {}, {}, {}
-            for title, (arcs, resources, cards) in res.items():
+            self.area_snd = {}
+            for title, (arcs, resources, cards) in img_res.items():
                 self.archives.update(arcs)
                 for r in resources:
                     r.note = self.custom_names.get(note_key(r), "")
@@ -1479,13 +1549,20 @@ class App:
                 self.area_res[title] = resources
                 self.area_cards[title] = cards
                 self.res_by.update({(title, r.tag, r.rid): r for r in resources})
+            for title, (arcs, resources) in snd_res.items():
+                self.archives.update(arcs)
+                for r in resources:
+                    r.note = self.custom_names.get(note_key(r), "")
+                self.area_snd[title] = resources
             if self.cur_card:  # keep the picked card across reloads (it's a new object now)
                 self.cur_card = self.area_cards.get(self.cur_card.area, {}).get(self.cur_card.cid)
             self.gen += 1
             self.img_cache.clear()
+            self._snd_info_cache.clear()
             self.images = {}
             allr = [r for v in self.area_res.values() for r in v]
-            self.set_busy(False, f"{len(allr)} images and movies in {len(AREAS)} areas, "
+            alls = [r for v in self.area_snd.values() for r in v]
+            self.set_busy(False, f"{len(allr)} images and movies, {len(alls)} sounds in {len(AREAS)} areas, "
                                  f"{sum(r.patched and not r.label for r in allr)} patched, {sum(r.label for r in allr)} ID labels")
             self.build_nav()
             self.refresh_list(keep_sel)
@@ -1512,6 +1589,8 @@ class App:
         for title, files, locked in areas:
             if tag == b"CARD":
                 res = list(self.area_cards.get(title, {}).values())
+            elif tag == R.TWAV:
+                res = list(self.area_snd.get(title, []))
             else:
                 res = [r for r in self.area_res.get(title, []) if r.tag == tag]
             aid = f"A|{title}"
@@ -1568,6 +1647,14 @@ class App:
         self.refresh_list()
 
     def on_kind(self):
+        self.snd_stop()
+        is_snd = self.kind.get() == "tWAV"
+        if is_snd:
+            self.canvas.pack_forget()
+            self.snd_bar.pack(fill="x", pady=(0, 4), before=self.info)
+        else:
+            self.snd_bar.pack_forget()
+            self.canvas.pack(fill="both", expand=True, before=self.info)
         self.build_nav()
         self.refresh_list()
 
@@ -1604,6 +1691,21 @@ class App:
             return any(self.is_changed(i) for i in self.card_items(x))
         return x.patched and not x.label or x.key() in self.staged
 
+    def _snd_info_col(self, r):
+        """Short codec/duration string for the 'cards' column when in Sounds mode (cached)."""
+        key = r.key()
+        cached = self._snd_info_cache.get(key)
+        if cached is not None:
+            return cached
+        try:
+            arc = self.archive_for(r, "orig")
+            data = arc.read(R.TWAV, r.rid)
+            s = SND.info_str(SND.parse_twav(data))
+        except Exception:
+            s = ""
+        self._snd_info_cache[key] = s
+        return s
+
     def card_status(self, card):
         items = self.card_items(card)
         n_edit = sum(i.patched and not i.label for i in items)
@@ -1635,9 +1737,12 @@ class App:
         self.refresh_list()
 
     def update_headings(self):
-        cards_mode = self.kind.get() == "CARD"
+        kd = self.kind.get()
+        cards_mode = kd == "CARD"
         titles = {"id": "ID", "loc": "Location", "name": "Card name" if cards_mode else "Name",
-                  "notes": "Notes", "cards": "Contents" if cards_mode else "Used on cards", "status": "Status"}
+                  "notes": "Notes",
+                  "cards": "Contents" if cards_mode else "Info" if kd == "tWAV" else "Used on cards",
+                  "status": "Status"}
         for c, t in titles.items():
             arrow = (" ▼" if self.sort_dir == "desc" else " ▲") if c == self.sort_col else ""
             self.tree.heading(c, text=t + arrow)
@@ -1740,11 +1845,18 @@ class App:
                     or flt == "Changed" and not (edited or staged) \
                     or flt == "Unchanged" and (edited or staged) or flt == "ID labels" and not r.label:
                 continue
-            cards = ", ".join(r.cards)
-            if q and q not in f"{r.rid} {r.note} {r.name} {cards}".lower():
-                continue
-            rows.append((f"{r.archive}|{r.rid}", r, self.row_tags(r),
-                         (r.rid, r.loc, r.name, r.note, cards, self.status_of(r))))
+            if tag == R.TWAV:
+                info_col = self._snd_info_col(r)
+                if q and q not in f"{r.rid} {r.note} {r.name} {info_col}".lower():
+                    continue
+                rows.append((f"{r.archive}|{r.rid}", r, self.row_tags(r),
+                             (r.rid, r.loc, r.name, r.note, info_col, self.status_of(r))))
+            else:
+                cards = ", ".join(r.cards)
+                if q and q not in f"{r.rid} {r.note} {r.name} {cards}".lower():
+                    continue
+                rows.append((f"{r.archive}|{r.rid}", r, self.row_tags(r),
+                             (r.rid, r.loc, r.name, r.note, cards, self.status_of(r))))
         self.insert_rows(rows, with_sections=(self.cur_loc is None and self.sort_col is None))
         n = len(self.staged)
         self.apply_btn.config(text=f"Apply staged ({n})")
@@ -1782,22 +1894,32 @@ class App:
         s(self.b_exp_o, r and not busy)
         s(self.b_exp_c, r and r.patched and not busy)
         s(self.b_find, r and self.kind.get() == "CARD")
-        s(self.ref_cur_btn, r and r.patched)
+        s(self.ref_cur_btn, r and r.patched and r.tag != R.TWAV)
         s(self.apply_btn, self.staged and not busy)
         if r and not r.patched and self.ref.get() == "cur":
             self.ref.set("orig")
         if r and r.tag == R.TMOV:
             s(self.play_btns["cur"], r.patched)
             s(self.play_btns["new"], bool(st))
+        self._snd_update_play_btn()
 
     def update_info(self):
         r = self.sel
         if not r:
             self.info.config(text="")
             self.note_row.pack_forget()
+            self.snd_info_lbl.config(text="")
             return
         self.note_var.set(r.note)
         self.note_row.pack(fill="x", pady=(0, 2), before=self.btns_row)
+        if r.tag == R.TWAV:
+            st = self.staged.get(r.key())
+            line2 = ("Staged: revert to original" if st == REVERT
+                     else "Staged: " + self.with_path("new file", st) if st
+                     else "Patched in game" if r.patched else "Original")
+            self.snd_info_lbl.config(text=f"sound {r.rid}  {r.archive}  {self._snd_info_col(r)}")
+            self.info.config(text=(f'"{r.note}"  ' if r.note else "") + (f"{r.name}  " if r.name else "") + line2)
+            return
         parts = [f"{KIND_NAMES[r.tag]} {r.rid}", r.archive]
         if r.note:
             parts.append(f'"{r.note}"')
@@ -1866,6 +1988,13 @@ class App:
         self.update_place_row()
         if r.tag == R.TBMP:
             self.movie_bar.pack_forget()
+        elif r.tag == R.TWAV:
+            self.movie_bar.pack_forget()
+            if self._snd_playing_key and self._snd_playing_key != r.key():
+                self.snd_stop()
+            self.update_buttons()
+            self.update_info()
+            return
         else:
             self.movie_bar.pack(fill="x", pady=(4, 0), before=self.info)
             self.duration = 0.0
@@ -2341,8 +2470,11 @@ class App:
         self.req += 1
         self.images = {}
         self.update_buttons()
+        self.update_info()
         if r.tag == R.TBMP:
             self.load_image_previews()
+        elif r.tag == R.TWAV:
+            pass
         else:
             self.load_movie()
 
@@ -2363,6 +2495,9 @@ class App:
         r = self.sel
         if not r:
             return
+        if r.tag == R.TWAV:
+            self._load_new_sound(r)
+            return
         if r.tag == R.TBMP:
             types = [("Images", " ".join("*" + e for e in sorted(R.IMAGE_EXTS))), ("All files", "*.*")]
         else:
@@ -2376,6 +2511,112 @@ class App:
             return
         self.stage(r, src)
 
+    # ---------------------------------------------------------------- sound playback
+
+    def _snd_update_play_btn(self):
+        playing = self._snd_playing_key is not None
+        s = lambda b, ok: b.state(["!disabled"] if ok else ["disabled"])  # noqa: E731
+        s(self.b_snd_play, self.sel and self.sel.tag == R.TWAV and not playing)
+        s(self.b_snd_stop, playing)
+
+    def snd_play(self):
+        r = self.sel
+        if not r or r.tag != R.TWAV or not _HAS_WINSOUND:
+            return
+        self.snd_stop()
+
+        which = "cur" if r.patched or r.key() in self.staged else "orig"
+        arc = self.archive_for(r, which)
+        self.set_busy(True, f"Loading sound {r.rid}...")
+
+        def job():
+            data = arc.read(R.TWAV, r.rid)
+            # If staged with a pre-encoded tWAV file, use that instead
+            staged_src = self.staged.get(r.key())
+            if staged_src and staged_src != REVERT:
+                with open(staged_src, "rb") as f:
+                    data = f.read()
+            return SND.export_to_wav(data)
+
+        def done(wav_bytes):
+            self.set_busy(False, "")
+            if self.sel is not r:
+                return  # user moved on while we were decoding
+            tmp = os.path.join(CACHE_DIR, f"play_{r.archive}_{r.rid}.wav")
+            with open(tmp, "wb") as f:
+                f.write(wav_bytes)
+            info = SND.parse_twav(arc.read(R.TWAV, r.rid))
+            dur_ms = int(info["sample_count"] / max(info["sample_rate"], 1) * 1000) + 200
+            _winsound.PlaySound(tmp, _winsound.SND_FILENAME | _winsound.SND_ASYNC)
+            self._snd_playing_key = r.key()
+            self.snd_play_lbl.config(text="Playing…")
+            self._snd_update_play_btn()
+            if self._snd_stop_job:
+                self.root.after_cancel(self._snd_stop_job)
+            self._snd_stop_job = self.root.after(dur_ms, self._snd_auto_stop)
+
+        self.run_bg(job, done)
+
+    def snd_stop(self):
+        if not _HAS_WINSOUND:
+            return
+        if self._snd_playing_key is not None:
+            _winsound.PlaySound(None, _winsound.SND_PURGE)
+        if self._snd_stop_job:
+            self.root.after_cancel(self._snd_stop_job)
+            self._snd_stop_job = None
+        self._snd_playing_key = None
+        self.snd_play_lbl.config(text="")
+        self._snd_update_play_btn()
+
+    def _snd_auto_stop(self):
+        self._snd_stop_job = None
+        self._snd_playing_key = None
+        self.snd_play_lbl.config(text="")
+        self._snd_update_play_btn()
+
+    def _load_new_sound(self, r):
+        """Stage a replacement for a tWAV resource: encode to a temp tWAV file then stage it."""
+        src = filedialog.askopenfilename(
+            title=f"New audio for sound {r.rid}",
+            filetypes=[("Audio files", "*.wav *.mp3 *.ogg *.flac *.aiff *.m4a *.mp2"),
+                       ("All files", "*.*")])
+        if not src:
+            return
+
+        # Determine target encoding from original resource
+        try:
+            orig_arc = self.archive_for(r, "orig")
+            orig_data = orig_arc.read(R.TWAV, r.rid)
+            info = SND.parse_twav(orig_data)
+            target_enc = info["encoding"]
+            rate = info["sample_rate"]
+            channels = info["channels"]
+            loop_count = info["loop_count"]
+            loop_start = info["loop_start"]
+            loop_end = info["loop_end"]
+        except Exception as e:
+            messagebox.showerror("Riven Mod Tool", f"Could not read original sound: {e}")
+            return
+
+        self.set_busy(True, f"Encoding {os.path.basename(src)}...")
+
+        def job():
+            audio_bytes, sample_count, preds, steps = SND.import_audio(src, target_enc, rate, channels)
+            twav = SND.build_twav(audio_bytes, rate, channels, target_enc, sample_count,
+                                  loop_count, loop_start, loop_end, preds, steps)
+            tmp = tempfile.NamedTemporaryFile(suffix=".twav", delete=False, dir=CACHE_DIR)
+            tmp.write(twav)
+            tmp.close()
+            return tmp.name
+
+        def done(tmp_path):
+            self.set_busy(False, "")
+            self.stage(r, tmp_path)
+            self._snd_info_cache.pop(r.key(), None)  # force re-read on next refresh
+
+        self.run_bg(job, done)
+
     def unstage(self):
         r = self.sel
         if r and r.key() in self.staged:
@@ -2388,6 +2629,8 @@ class App:
         self.images = {}
         self.update_buttons()
         self.update_info()
+        if r.tag == R.TWAV:
+            return
         self.load_image_previews() if r.tag == R.TBMP else self.load_movie()
 
     def revert(self):
@@ -2456,7 +2699,22 @@ class App:
         r = self.sel
         if not r:
             return
-        if r.tag == R.TBMP:
+        if r.tag == R.TWAV:
+            out = filedialog.asksaveasfilename(initialfile=out_name(r, ".wav"), defaultextension=".wav",
+                                               filetypes=[("WAV audio", "*.wav"), ("All files", "*.*")])
+            if not out:
+                return
+            arc = self.archive_for(r, which)
+
+            def job():
+                data = arc.read(R.TWAV, r.rid)
+                wav = SND.export_to_wav(data)
+                with open(out, "wb") as f:
+                    f.write(wav)
+                return out
+            self.set_busy(True, f"Exporting {os.path.basename(out)}...")
+            self.run_bg(job, lambda o: self.set_busy(False, self.with_path("Saved", o)))
+        elif r.tag == R.TBMP:
             out = filedialog.asksaveasfilename(initialfile=out_name(r, ".png"), defaultextension=".png",
                                                filetypes=[("PNG", "*.png")])
             if out:
@@ -2484,6 +2742,10 @@ class App:
         if tag == b"CARD":
             messagebox.showinfo("Riven Mod Tool", "Switch to Images or Movies to export. In Cards mode, "
                                 "\"Export original...\" saves the item picked on the current card.")
+            return
+        if tag == R.TWAV:
+            messagebox.showinfo("Riven Mod Tool", "Use \"Export original...\" or \"Export current...\" "
+                                "to export individual sounds. Batch export is not available for sounds.")
             return
         items = list(self.rows.values())  # exactly what the list shows (area, location, filters)
         what = f"{len(items)} {KIND_NAMES[tag]}s"
@@ -2604,6 +2866,9 @@ class App:
                         patches.pop((tag, rid), None)
                     elif tag == R.TBMP:
                         patches[(tag, rid)] = R.encode_tbmp_24(Image.open(src))
+                    elif tag == R.TWAV:
+                        with open(src, "rb") as f:
+                            patches[(tag, rid)] = f.read()
                     else:
                         self.post_status(f"{arc}: encoding movie {rid} ({i}/{len(items)})...")
                         patches[(tag, rid)] = R.encode_movie(src, orig.read_movie(rid))
@@ -3015,7 +3280,8 @@ def main():
         else:
             continue
         break
-    App(root, game_dir)
+    app = App(root, game_dir)
+    root.protocol("WM_DELETE_WINDOW", lambda: (app.snd_stop(), root.destroy()))
     root.mainloop()
 
 
