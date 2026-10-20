@@ -75,3 +75,7 @@ Push with plain `git push` (Git for Windows' stored sign-in works). The `gh` CLI
 - Shell gotcha: heredocs and `python -c` mangle backslashes. Write scripts with the Write tool.
 - Git: this repo's `.gitignore` is an allowlist. New tool files must be added to it explicitly. Never track game
   archives or `.orig` backups. Checkpoints are commits; list them with `git log --oneline`.
+
+## Dispatcher
+- Dispatcher session: local_370f52f7-8b86-4944-ae2a-3b5bc67f7a01 (started 2026-10-20, Sonnet medium).
+- 2026-10-20: proposed cards for queue 1 (sound in-game test, Opus medium; riven_snd.py, riven_gui.py) and queue 2+3 (docs, Sonnet medium; riven_help.py, CLAUDE.md). Waiting on Boss to start them. Next: puzzle logic design card (Opus high).
