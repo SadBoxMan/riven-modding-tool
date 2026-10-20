@@ -8,6 +8,9 @@ Where things live: the code and this repo are in `C:\Users\lukea\Games\Steam Lib
 (a git repo). Claude sessions start in `C:\Users\lukea\Claude\Projects\Guild`, which is EMPTY and not a repo, so
 CLAUDE.md here is NOT auto-loaded. Read it by path.
 
+GitHub: `origin` = https://github.com/SadBoxMan/riven-modding-tool (migrated 2026-10-20; `main` tracks `origin/main`).
+Push with plain `git push` (Git for Windows' stored sign-in works). The `gh` CLI is installed but was never logged in.
+
 ## State right now
 - Working and shipped to a friend: image, movie and (new) sound browsing/patching, hotspot viewer, notes column,
   nav drag-reorder, bundled cursors, PyInstaller exes.
