@@ -28,10 +28,10 @@ Push with plain `git push` (Git for Windows' stored sign-in works). The `gh` CLI
 
 ## Work queue (proposed order, Boss to confirm or reorder)
 1. In-game test of sound replacement (see above). Fix whatever breaks (loop points, MP2 frame/size limits).
-2. DONE 2026-10-20 (docs only): Update docs for sounds: add a Sounds topic to `riven_help.py` (CLAUDE.md says keep help in step with features),
+2. DONE 2026-10-20 (RIV-002, docs only, 28cf22b): Update docs for sounds: add a Sounds topic to `riven_help.py` (CLAUDE.md says keep help in step with features),
    and add a Sounds section plus the riven_snd.py format facts to `CLAUDE.md` (tWAV layout is in the riven_snd.py
    docstring).
-3. DONE 2026-10-20: Tidy CLAUDE.md: its "Pending / offered" section is stale (says changes uncommitted, last checkpoint df25f19).
+3. DONE 2026-10-20 (RIV-002): Tidy CLAUDE.md: its "Pending / offered" section is stale (says changes uncommitted, last checkpoint df25f19).
 4. Puzzle logic / event-flag flow (VAR resources, which flags gate which transitions). Not started. Skeleton:
    `dev/scripts/walk_graph.py`.
 5. Ideas not started (from CLAUDE.md): imported layer opacity/blend, merge new unnamed layers down, movie
