@@ -46,14 +46,13 @@ CLAUDE.md here is NOT auto-loaded. Read it by path.
 
 ## Questions waiting on Boss
 - Priority order above OK? Anything to add (more sound features, e.g. batch import/export of sounds)?
-- Should `cursors/` (user-supplied game cursor set, needed by the exe build) be tracked in git? Currently it is not,
-  so a fresh clone cannot build the exe.
 - Is the test line in a_data.mhk still wanted?
 
 ## Build, run, test
 - Run from source: `python riven_gui.py "<game folder>"` (needs Pillow; ffmpeg on PATH, or the WinGet Links
   fallback, for movies and sounds). Game/ScummVM must be closed to apply patches.
-- Build exes (from the Riven folder; needs PyInstaller; `cursors/` and `realmyst.ico` must exist):
+- Build exes (from the Riven folder; needs PyInstaller; `cursors/` (tracked in git since 2026-10-20) and
+  `realmyst.ico` must exist):
   - `python -m PyInstaller RivenModTool.spec --noconfirm` -> full build with ffmpeg bundled (~103 MB). The spec
     hardcodes the WinGet ffmpeg path (`_FFMPEG`); update it if ffmpeg moves or its version changes.
   - `python -m PyInstaller RivenModTool-noffmpeg.spec --noconfirm` -> ~19 MB, relies on ffmpeg on PATH.
