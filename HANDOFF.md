@@ -1,5 +1,11 @@
 # HANDOFF: Riven Mod Tool
 
+TASK-CARD RULE: task cards for this project come from the session titled "Riven Modding Tool dispatcher" (it owns the
+queue below and does no project work itself; its id is in the memory note `dispatcher.md`). When a work session
+finishes its task: update this file, commit the files it changed by explicit path (other sessions may share the
+checkout), push, send the dispatcher a short completion message (send_message), and tell Boss to go back to the
+dispatcher for the next card. Follow-ups found during the work go into the queue below, not into new cards.
+
 Read this at the start of every session, and update it before the session ends.
 Last updated: 2026-10-17. Project notes and format facts live in `CLAUDE.md` (same folder); this file is the
 "where are we now" layer on top of it.
