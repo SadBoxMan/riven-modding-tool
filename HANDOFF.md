@@ -7,7 +7,7 @@ checkout), push, send the dispatcher a short completion message (send_message), 
 dispatcher for the next card. Follow-ups found during the work go into the queue below, not into new cards.
 
 Read this at the start of every session, and update it before the session ends.
-Last updated: 2026-10-17. Project notes and format facts live in `CLAUDE.md` (same folder); this file is the
+Last updated: 2026-10-20. Project notes and format facts live in `CLAUDE.md` (same folder); this file is the
 "where are we now" layer on top of it.
 
 Where things live: the code and this repo are in `C:\Users\lukea\Games\Steam Library\steamapps\common\Riven`
@@ -28,10 +28,10 @@ Push with plain `git push` (Git for Windows' stored sign-in works). The `gh` CLI
 
 ## Work queue (proposed order, Boss to confirm or reorder)
 1. In-game test of sound replacement (see above). Fix whatever breaks (loop points, MP2 frame/size limits).
-2. Update docs for sounds: add a Sounds topic to `riven_help.py` (CLAUDE.md says keep help in step with features),
+2. DONE 2026-10-20 (docs only): Update docs for sounds: add a Sounds topic to `riven_help.py` (CLAUDE.md says keep help in step with features),
    and add a Sounds section plus the riven_snd.py format facts to `CLAUDE.md` (tWAV layout is in the riven_snd.py
    docstring).
-3. Tidy CLAUDE.md: its "Pending / offered" section is stale (says changes uncommitted, last checkpoint df25f19).
+3. DONE 2026-10-20: Tidy CLAUDE.md: its "Pending / offered" section is stale (says changes uncommitted, last checkpoint df25f19).
 4. Puzzle logic / event-flag flow (VAR resources, which flags gate which transitions). Not started. Skeleton:
    `dev/scripts/walk_graph.py`.
 5. Ideas not started (from CLAUDE.md): imported layer opacity/blend, merge new unnamed layers down, movie

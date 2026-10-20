@@ -105,7 +105,7 @@ Header size fields are not touched.
   combobox popdown listboxes, Treeview tag colours (TAG_COLORS per mode), the help window (riven_help.PALETTES),
   and the DWM dark title bar (attribute 20/19). The native menubar can't be themed from Tk.
   Gotcha: ttk state(["readonly"]) does NOT clear "disabled"; use ["!disabled", "readonly"].
-- Help menu / F1: riven_help.py holds the user guide (11 topics, light markup: # / ## / - / > / 4-space code /
+- Help menu / F1: riven_help.py holds the user guide (13 topics, light markup: # / ## / - / > / 4-space code /
   **bold**). Keep it in step when features or import rules change.
 - Nav tree: Island > Location. Locations come from codes in resource names ("166_tgr_..." -> Gate Room), see
   LOC_RULES / COMMON_RULES / NAME_RULES (regex matched at the START of the code with the stack letter removed).
@@ -194,12 +194,28 @@ Header size fields are not touched.
   than real texture).
 - Every encode round-trips exactly through the decoder port. NOT yet tested in-game.
 
+## Sounds: riven_snd.py + GUI "Sounds" mode
+Sound archives per area (SOUND_AREAS in riven_gui.py): `*_data*.mhk` = short ADPCM effects, `*_sounds.mhk` = long
+ambient MP2 tracks (312 tWAV resources over 8 areas). Mode features: list (codec/duration in the Info column),
+play/stop (winsound, via a temp WAV), export WAV (one at a time), import replacement, stage, apply, revert.
+- tWAV layout (verified): outer MHWK header (12 bytes: MHWK, size, WAVE), an optional ADPC chunk (IMA seek table),
+  then a Data chunk with a 20-byte format header (sampleRate u16, sampleCount u32, bitsPerSample u8, channels u8,
+  encoding u16, loopCount u16, loopStart u32, loopEnd u32), then the raw audio. Encoding: 0 = PCM (rare), 1 = DVI
+  ADPCM, 2 = MP2.
+- DVI ADPCM is one continuous nibble stream with NO block headers: high nibble = left, low nibble = right (mono:
+  high = sample 2n, low = 2n+1). Initial predictor and step per channel come from the ADPC table (frame 0).
+- Import (`import_audio` -> `build_twav`): ffmpeg decodes the user's file to s16le at the ORIGINAL's rate and channel
+  count, then it is re-encoded to the original's codec (own ADPCM encoder, or ffmpeg MP2) and wrapped with the
+  original's loop fields. The GUI stages a pre-built .twav temp file; Apply stores it verbatim as the patch.
+- Format research and capacity scripts: `dev/twav/` (capacity scripts stub PIL; run WITHOUT `python -I`).
+- !! SOUND REPLACEMENT IS NOT YET CONFIRMED IN-GAME (2026-10-20). Only round-trip tested outside the game; an in-game
+  test of one effect and one ambient track is in progress. Update this section with the result.
+
 ## Pending / offered
-- DONE 2026-10-05: sortable columns (on_sort / insert_rows / natural_key in riven_gui.py). Blanks stay last, and the
-  sort persists across refresh and mode switches. Direction was flipped later: first click = ascending.
-- DONE 2026-10-05: "Intro & cutscenes" location (Temple: tintro/tlogo/tguard and the t1.x cage/ending movies).
-- DONE 2026-10-05: Preferences menu, path hiding, location reassessment, whole-card layered export/import.
-  These changes are NOT committed yet (last checkpoint: df25f19); .gitignore now also allows riven_layers.py.
+- DONE: sortable columns, "Intro & cutscenes" location, Preferences menu and path hiding, location reassessment,
+  whole-card layered export/import, hotspot viewer, notes column, nav drag-reorder, sound browsing/patching, bundled
+  cursors, PyInstaller exes. Everything is committed and pushed to `origin` (main); list with `git log --oneline`.
+  The `.gitignore` allowlist needs new tool files added explicitly. "Where are we now" lives in HANDOFF.md.
 - Ideas not started: apply an imported layer's opacity/blend; import new (unnamed) layers by merging them onto the
   layer below; movie reference layers using the LAST frame too.
 

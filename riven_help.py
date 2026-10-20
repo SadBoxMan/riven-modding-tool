@@ -184,6 +184,38 @@ About **3x the movie's running time**, per movie. A 5-second clip takes seconds;
 The same idea: the original's frame size (or at least its aspect ratio), any frame rate, high quality, and the same length. H.264 MP4, ProRes/DNx .mov, or uncompressed AVI all work.
 """),
 
+("Sounds", """
+# Sounds
+Switch the top bar to **Sounds** to browse, listen to, export and replace the game's audio.
+
+## Listing
+- Each area has two kinds of sound, shown as the location: **Sound effects** (short clips from the `*_data*.mhk` archives) and **Ambient tracks** (long background loops from the `*_sounds.mhk` archives).
+- The **Info** column shows the codec and length of each sound.
+- Sounds have no card positions or previews, so the compare views, Show on card and Cards mode don't apply to them.
+
+## Play and stop
+- **Play** decodes the selected sound and plays it through Windows. If the sound is staged or already patched you hear the new version; otherwise the original.
+- **Stop** ends playback. Playback also stops when you pick another sound or switch mode.
+
+## Export WAV
+**Export original...** and **Export current...** save the selected sound as a standard **.wav** file you can edit in Audacity or similar. Sounds export one at a time; batch export isn't available for them.
+
+## Import a replacement
+- **Load new...** accepts wav, mp3, ogg, flac, aiff, m4a and mp2 files.
+- **ffmpeg is needed.** It decodes your file, converts it to the original's sample rate and channel count, and re-encodes it to the **original's codec**: **ADPCM** for effects, **MP2** for ambient tracks. You can't change the codec.
+- The original's loop settings are kept.
+- The result is staged (orange), like an image or movie.
+
+> Sound replacement is new and has not yet been confirmed in the game. Try one short effect first.
+
+## Stage, apply, restore
+- A staged sound can be played, unstaged or discarded like any other change.
+- **Apply staged** writes it into the archive with the same scheme as images and movies. Close Riven first.
+- **Revert to original** stages putting a sound back. From a command prompt in the game folder this also works:
+
+    python riven_img.py restore t_data1.mhk
+"""),
+
 ("Batch editing (export / stage folder)", """
 # Batch editing
 ## Export listed items
