@@ -79,3 +79,4 @@ Push with plain `git push` (Git for Windows' stored sign-in works). The `gh` CLI
 ## Dispatcher
 - Dispatcher session: local_370f52f7-8b86-4944-ae2a-3b5bc67f7a01 (started 2026-10-20, Sonnet medium).
 - 2026-10-20: proposed cards for queue 1 (sound in-game test, Opus medium; riven_snd.py, riven_gui.py) and queue 2+3 (docs, Sonnet medium; riven_help.py, CLAUDE.md). Waiting on Boss to start them. Next: puzzle logic design card (Opus high).
+- Task numbering: every card is RIV-NNN (next free number below), used in the session title, brief, commits and completion message. RIV-001 sound in-game test (queue 1); RIV-002 docs (queue 2+3, started 2026-10-20). Next free: RIV-003.
